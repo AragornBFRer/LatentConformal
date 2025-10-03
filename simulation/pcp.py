@@ -1173,6 +1173,9 @@ def simulate_data(num_samples, setting):
     if setting == 2:
         Y = np.dot(X_, beta) + 4 * noise * (1 + 3 * (X[:, 0] <= 5))
         # + np.dot(X2, beta2)
+    if setting == 3:
+        # <=3, (3,6], >6
+        Y = np.dot(X_, beta) + 4 * noise * (1 + 3 * (X[:, 0] <= 3) + 3 * (X[:, 0] > 6))
     X_out = np.concatenate([X, X2], axis=1)
 
     return X_out, Y
