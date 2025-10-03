@@ -1104,8 +1104,8 @@ def train_val_test_split(X, Y, p, p2=None, return_index=False, random_state=None
         # Return the standardized data along with the original test set and test indices
         return X_train, X_val, X_test, Y_train, Y_val, Y_test, X_test_0, idx_test
     else:
-        # Return the standardized data along with the original test set
-        return X_train, X_val, X_test, Y_train, Y_val, Y_test, X_test_0
+        # Return the standardized data along with the original validation and test sets
+        return X_train, X_val, X_test, Y_train, Y_val, Y_test, X_val_0, X_test_0
 
 
 def softmax(x, axis=1):
