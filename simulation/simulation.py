@@ -79,9 +79,10 @@ class ClusterwiseOracle:
     we discretize them into bins to create discrete clusters.
     """
 
-    def __init__(self):
+    def __init__(self, setting=1):
         self.cluster_boundaries = None
         self.name = "Cluster-wise Oracle"
+        self.setting = setting
 
     def _discretize_features(self, X):
         """Create clusters based on distinct X values,
@@ -128,9 +129,9 @@ class ClusterwiseOracle:
                     # Use the single residual or fall back to global
                     quantile = np.quantile(R_val, 1-alpha)
             else:
-                # Fallback to global quantile if cluster not seen in validation
-                quantile = np.quantile(R_val, 1-alpha)
-            
+                raise ValueError("Error in calibrating for the ClusterwiseOracle:\n",
+                                 f"-->  Test point cluster {cluster_id} not seen in validation set.")
+
             quantiles.append(quantile)
             coverage.append(1 if R_test[i] <= quantile else 0)
         
@@ -176,30 +177,32 @@ def run_simulation(num_samples=1200, alpha=0.1, setting=1, random_seed=42, n_tre
     }
     
     # -- Naive Oracle Method
-    print("-- Running Naive Oracle...")
-    naive_oracle = NaiveOracle()
-    naive_quantiles, naive_coverage = naive_oracle.calibrate(X_val, R_val, X_test, R_test, 
-                                                             predictions_test, alpha)
-    
-    results['Naive Oracle'] = {
-        'quantiles': naive_quantiles,
-        'coverage': naive_coverage,
-        'avg_length': np.mean(naive_quantiles) * 2,
-        'coverage_rate': np.mean(naive_coverage)
-    }
+    if False:
+        print("-- Running Naive Oracle...")
+        naive_oracle = NaiveOracle()
+        naive_quantiles, naive_coverage = naive_oracle.calibrate(X_val, R_val, X_test, R_test, 
+                                                                predictions_test, alpha)
+        
+        results['Naive Oracle'] = {
+            'quantiles': naive_quantiles,
+            'coverage': naive_coverage,
+            'avg_length': np.mean(naive_quantiles) * 2,
+            'coverage_rate': np.mean(naive_coverage)
+        }
     
     # --Cluster-wise Oracle Method
-    print("-- Running Cluster-wise Oracle...")
-    cluster_oracle = ClusterwiseOracle()
-    cluster_quantiles, cluster_coverage = cluster_oracle.calibrate(X_val, R_val, X_test, R_test,
-                                                                   predictions_test, alpha)
-    
-    results['Cluster-wise Oracle'] = {
-        'quantiles': cluster_quantiles,
-        'coverage': cluster_coverage,
-        'avg_length': np.mean(cluster_quantiles) * 2,
-        'coverage_rate': np.mean(cluster_coverage)
-    }
+    if setting != 1:
+        print("-- Running Cluster-wise Oracle...")
+        cluster_oracle = ClusterwiseOracle(setting=setting)
+        cluster_quantiles, cluster_coverage = cluster_oracle.calibrate(X_val, R_val, X_test, R_test,
+                                                                    predictions_test, alpha)
+        
+        results['Cluster-wise Oracle'] = {
+            'quantiles': cluster_quantiles,
+            'coverage': cluster_coverage,
+            'avg_length': np.mean(cluster_quantiles) * 2,
+            'coverage_rate': np.mean(cluster_coverage)
+        }
     
     # PCP Method
     print("-- Running PCP...")    
@@ -248,7 +251,8 @@ def print_results(results, alpha):
     print("-" * 70)
 
 
-def plot_results(results, X_test_0, Y_test, predictions_test, feature_idx=0, num_samples=None, n_tree=None):
+def plot_results(results, X_test_0, Y_test, predictions_test, feature_idx=0, 
+                 num_samples=None, n_tree=None, seed=None, setting=None):
     """Plot prediction intervals for visual comparison"""
     
     # Sort by feature for better visualization
@@ -262,7 +266,10 @@ def plot_results(results, X_test_0, Y_test, predictions_test, feature_idx=0, num
     n_methods = len(plot_results_dict)
     
     # Determine subplot layout
-    if n_methods <= 4:
+    if n_methods == 2:
+        fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+        axes = axes.flatten()
+    elif n_methods <= 4:
         fig, axes = plt.subplots(2, 2, figsize=(15, 12))
         axes = axes.flatten()
     else:
@@ -307,6 +314,10 @@ def plot_results(results, X_test_0, Y_test, predictions_test, feature_idx=0, num
     outpath = OUTPATH_FIG.format(num_samples=num_samples)
     if n_tree is not None:
         outpath = outpath.replace('.png', f'_ntree{n_tree}.png')
+    if seed is not None:
+        outpath = outpath.replace('.png', f'_seed{seed}.png')
+    if setting is not None:
+        outpath = outpath.replace('out/', f'out/setting{setting}/')
     plt.tight_layout()
     plt.savefig(outpath, dpi=150, bbox_inches='tight')
     plt.show()
@@ -315,11 +326,11 @@ def plot_results(results, X_test_0, Y_test, predictions_test, feature_idx=0, num
 def main():
     """Main simulation function"""
     # Simulation parameters
-    num_samples = 1500
+    num_samples = 1200
     alpha = 0.1
     setting = 1
-    random_seed = 42
-    n_tree = 100
+    random_seed = 31
+    n_tree = 120
     
     print("Simulation Study: Comparing Conformal Prediction Methods")
     print(f"Sample size: {num_samples}")
@@ -364,7 +375,8 @@ def main():
 
     # Plot results
     print(f"\nGenerating plots...")
-    plot_results(results, X_test_0, Y_test, predictions_test, num_samples=num_samples, n_tree=n_tree)
+    plot_results(results, X_test_0, Y_test, predictions_test, 
+                 num_samples=num_samples, n_tree=n_tree, seed=random_seed, setting=setting)
 
     out_fig = OUTPATH_FIG.format(num_samples=num_samples)
     print(f"\nSimulation completed! Check '{out_fig}' for plots.")
