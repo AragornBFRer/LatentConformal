@@ -1158,27 +1158,144 @@ def replace_nan_columns_with_ones(X):
     return X
 
 
-def simulate_data(num_samples, setting):
+def simulate_data(num_samples,
+                  setting,
+                  # --- simple, small set of parameters for settings 4 & 5 ---
+                  p=50,                 # number of features for high-dim settings
+                  K=3,                  # number of clusters
+                  s=5,                  # active features per cluster (setting 4)
+                  num_active_blocks=2,  # active blocks per cluster (setting 5)
+                  block_size=None,      # block size for setting 5; if None choose automatically
+                  sigma=1.0,            # noise std (same for all clusters)
+                  return_meta=False,
+                  random_state=None):
+    """Simple simulator.
 
-    X = np.random.rand(num_samples, 1) * 8
-    X2 = np.random.rand(num_samples, 5) * 8
-    beta2 = np.random.randn(5)
-    noise = np.random.normal(0, 1, num_samples)
-    X_0 = PolynomialFeatures(2, include_bias=False).fit_transform(X)
-    X_ = np.concatenate([X_0, X * np.sin(X), X2], axis=1)
-    beta = np.concatenate([np.array([-3, 1, -5]), beta2])
+    - Settings 1..3: original setting.
+    - Setting 4: clustered sparse linear model. X ~ N(0, I_p); each cluster k has
+      s nonzero coordinates in beta^{(k)} (chosen at random). Y = X^T beta^{(c)} + noise.
+    - Setting 5: block-wise / group-sparse clusters. Partition {1..p} into blocks of
+      size `block_size` (or chosen automatically). Each cluster activates a few blocks;
+      coefficients inside active blocks are nonzero.
 
-    if setting == 1:
-        Y = np.dot(X_, beta) + 4 * noise * (1 + 0.5 * abs(X[:, 0] - 3) ** 2)
-    if setting == 2:
-        Y = np.dot(X_, beta) + 4 * noise * (1 + 3 * (X[:, 0] <= 5))
-        # + np.dot(X2, beta2)
-    if setting == 3:
-        # <=3, (3,6], >6
-        Y = np.dot(X_, beta) + 4 * noise * (1 + 3 * (X[:, 0] <= 3) + 3 * (X[:, 0] > 6))
-    X_out = np.concatenate([X, X2], axis=1)
+    Args
+    ----
+    num_samples : int
+        Number of samples to generate.
+    setting : int
+        Which setting to use (1..5).
+    p : int, optional
+        Number of features (for settings 4 & 5). Default is 50.
+    K : int, optional
+        Number of clusters (for settings 4 & 5). Default is 3.
+    s : int, optional
+        Number of active features per cluster (for setting 4). Default is 5.
+    num_active_blocks : int, optional
+        Number of active blocks per cluster (for setting 5). Default is 2.
+    block_size : int or None, optional
+        Block size (for setting 5). If None, choose automatically. Default is None.
+    sigma : float, optional
+        Noise standard deviation (for settings 4 & 5). Default is 1.0.
+    return_meta : bool, optional
+        Whether to return metadata (betas, supports/active_blocks, clusters). Default is False.
+    random_state : int or None, optional
+        Random seed for reproducibility. Default is None.
 
+    Returns
+    -------
+    X_out : ndarray, shape (n, d)
+        Feature matrix. For settings 1..3 d==6 (original small features). For 4..5 d==p.
+    Y : ndarray, shape (n,)
+        Response vector.
+    (optional) meta : dict
+        If return_meta=True, returns a dict with simple metadata: 'betas',
+        'supports' or 'active_blocks', and 'clusters'.
+    """
+
+    rng = np.random.default_rng(random_state)
+
+    # --- settings 1-3: keep original small-data behaviour (simple) ---
+    if setting in (1, 2, 3):
+
+        X = np.random.rand(num_samples, 1) * 8
+        X2 = np.random.rand(num_samples, 5) * 8
+        beta2 = np.random.randn(5)
+        noise = np.random.normal(0, 1, num_samples)
+        X_0 = PolynomialFeatures(2, include_bias=False).fit_transform(X)
+        X_ = np.concatenate([X_0, X * np.sin(X), X2], axis=1)
+        beta = np.concatenate([np.array([-3, 1, -5]), beta2])
+
+        if setting == 1:
+            Y = np.dot(X_, beta) + 4 * noise * (1 + 0.5 * abs(X[:, 0] - 3) ** 2)
+        if setting == 2:
+            Y = np.dot(X_, beta) + 4 * noise * (1 + 3 * (X[:, 0] <= 5))
+            # + np.dot(X2, beta2)
+        if setting == 3:
+            # <=3, (3,6], >6
+            Y = np.dot(X_, beta) + 4 * noise * (1 + 3 * (X[:, 0] <= 3) + 3 * (X[:, 0] > 6))
+        X_out = np.concatenate([X, X2], axis=1)
+
+        return X_out, Y
+
+    # --- settings 4 & 5: simplified high-dimensional setups ---
+    if setting not in (4, 5):
+        raise ValueError("Unsupported setting. Choose setting in {1,2,3,4,5}.")
+
+    # simple feature matrix: iid standard normal columns
+    X_hd = rng.standard_normal((num_samples, p))
+
+    # cluster assignments (uniform by default)
+    clusters = rng.integers(low=0, high=K, size=num_samples)
+
+    betas = np.zeros((K, p))
+
+    if setting == 4:
+        # Clustered sparse linear model
+        supports = []
+        for k in range(K):
+            # choose s indices (if s>p, use all)
+            s_k = min(s, p)
+            support_k = rng.choice(p, size=s_k, replace=False)
+            supports.append(np.sort(support_k))
+            # simple coefficient values ~ N(0, 1)
+            betas[k, support_k] = rng.standard_normal(s_k)
+
+        # predictions: pick the beta corresponding to each example's cluster
+        preds = np.sum(X_hd * betas[clusters], axis=1)
+        Y = preds + sigma * rng.standard_normal(num_samples)
+
+        X_out = X_hd
+        meta = {'betas': betas, 'supports': supports, 'clusters': clusters}
+
+    else:  # setting == 5
+        # Block-wise active features / group-sparse clusters
+        if block_size is None:
+            # choose about 10 blocks or at least size 1
+            B = min(10, max(1, p))
+            block_size = max(1, p // B)
+        B = int(np.ceil(p / block_size))
+        blocks = [np.arange(b * block_size, min((b + 1) * block_size, p)) for b in range(B)]
+
+        active_blocks_list = []
+        for k in range(K):
+            nb = min(num_active_blocks, B)
+            active_blocks = rng.choice(B, size=nb, replace=False)
+            active_blocks_list.append(np.sort(active_blocks))
+            # set coefficients inside chosen blocks
+            for b in active_blocks:
+                idxs = blocks[b]
+                betas[k, idxs] = rng.standard_normal(idxs.size)
+
+        preds = np.sum(X_hd * betas[clusters], axis=1)
+        Y = preds + sigma * rng.standard_normal(num_samples)
+
+        X_out = X_hd
+        meta = {'betas': betas, 'active_blocks': active_blocks_list, 'blocks': blocks, 'clusters': clusters}
+
+    if return_meta:
+        return X_out, Y, meta
     return X_out, Y
+
 
 
 def cross_val_residuals(X_train, Y_train, model, n_splits=10, random_state=123456):

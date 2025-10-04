@@ -1,9 +1,8 @@
 """
 Simulation study comparing multiple conformal prediction methods.
 1. SCP (Split Conformal Prediction) - standard conformal prediction baseline
-2. Naive Oracle - uses global score functions (naive baseline, not true conditional)
-3. Cluster-wise Oracle - conditional on discrete feature clusters (Equation 5)
-4. PCP - complete posterior conformal prediction implementation
+2. Cluster-wise Oracle - conditional on discrete feature clusters (Equation 5)
+3. PCP - complete posterior conformal prediction implementation
 """
 
 import numpy as np
@@ -15,109 +14,80 @@ from tqdm import tqdm
 import warnings
 warnings.filterwarnings("ignore")
 
-# Import from the existing pcp.py
 from pcp import simulate_data, train_val_test_split, SCP, PCP
 
-
-OUTPATH_FIG = 'out/simulation_comparison_samples{num_samples}.png'
-
-
-class NaiveOracle:
-    """
-    Naive Oracle method using global score functions
-    
-    Uses global empirical distribution of residuals without conditioning on features.
-    This is NOT the true conditional distribution but rather a naive baseline that
-    ignores feature-dependent heteroscedasticity.
-    """
-    
-    def __init__(self):
-        self.name = "Naive Oracle"
-    
-    def calibrate(self, X_val, R_val, X_test, R_test, predictions_test, alpha):
-        """Generate prediction intervals using oracle method"""
-        n_val = len(R_val)
-        quantiles = []
-        coverage = []
-        
-        for i in range(len(X_test)):
-            # Use empirical quantile from validation set as proxy for oracle
-            # Add small noise to break ties
-            extended_residuals = np.append(R_val, 0)
-            
-            # Binary search for the quantile
-            low, high = 0, np.max(R_val) * 2
-            epsilon = 1e-6
-            
-            for _ in range(10000):  # Limit iterations
-                if high - low < epsilon:
-                    break
-                    
-                mid = (low + high) / 2
-                extended_residuals[-1] = mid
-                
-                # Calculate empirical probability
-                p_empirical = np.mean(extended_residuals >= mid)
-                
-                if p_empirical > alpha:
-                    high = mid
-                else:
-                    low = mid
-            
-            quantile = (low + high) / 2
-            quantiles.append(quantile)
-            coverage.append(1 if R_test[i] <= quantile else 0)
-        
-        return quantiles, coverage
+from eval_const import OUTPATH_FIG
+from eval_utils import print_results, plot_results
 
 
 class ClusterwiseOracle:
     """
     Cluster-wise calibration oracle method (Equation 5)
     
-    Each discrete X value forms its own cluster. For continuous features,
-    we discretize them into bins to create discrete clusters.
+    For settings 1-3: Each discrete X value forms its own cluster based on feature thresholds.
+    For settings 4-5: Uses the true cluster assignments from the data generation process.
     """
 
-    def __init__(self, setting=1):
+    def __init__(self, setting=1, meta=None):
         self.cluster_boundaries = None
         self.name = "Cluster-wise Oracle"
         self.setting = setting
+        self.meta = meta  # Metadata containing true cluster assignments for settings 4-5
 
-    def _get_ground_truth_clusters(self, X):
+    def _get_ground_truth_clusters(self, X, indices=None):
         """Create clusters based on ground truth from data generation process
         
         The oracle knows the true clustering structure from how the data was generated:
         - Setting 1: Continuous variance (no discrete clusters - should not use this method)
         - Setting 2: Two clusters based on X[:, 0] <= 5 vs X[:, 0] > 5
         - Setting 3: Three clusters based on X[:, 0] <= 3, (3,6], X[:, 0] > 6
-        """
-        x_first_feature = X[:, 0]  # The first feature determines the clustering
+        - Setting 4: Clustered sparse linear model - uses true cluster assignments from metadata
+        - Setting 5: Block-wise clusters - uses true cluster assignments from metadata
         
-        if self.setting == 1:
-            # Setting 1 has continuous variance change, not discrete clusters
-            # Fall back to creating many fine-grained clusters based on first feature
-            # Discretize into bins for approximation
-            bins = np.linspace(0, 8, 21)  # 20 bins across [0,8] range
-            cluster_ids = np.digitize(x_first_feature, bins)
-        elif self.setting == 2:
-            # Setting 2: Two clusters - X[:, 0] <= 5 vs X[:, 0] > 5
-            cluster_ids = (x_first_feature > 5).astype(int)
-        elif self.setting == 3:
-            # Setting 3: Three clusters - X[:, 0] <= 3, (3,6], X[:, 0] > 6
-            cluster_ids = np.zeros(len(x_first_feature), dtype=int)
-            cluster_ids[x_first_feature <= 3] = 0
-            cluster_ids[(x_first_feature > 3) & (x_first_feature <= 6)] = 1
-            cluster_ids[x_first_feature > 6] = 2
+        Args:
+            X: Feature matrix (may be standardized)
+            indices: Original indices in the full dataset (for settings 4-5)
+        """
+        if self.setting in [1, 2, 3]:
+            # Original settings use feature-based clustering
+            x_first_feature = X[:, 0]  # The first feature determines the clustering
+            
+            if self.setting == 1:
+                # Setting 1 has continuous variance change, not discrete clusters
+                # Fall back to creating many fine-grained clusters based on first feature
+                # Discretize into bins for approximation
+                bins = np.linspace(0, 8, 21)  # 20 bins across [0,8] range
+                cluster_ids = np.digitize(x_first_feature, bins)
+            elif self.setting == 2:
+                # Setting 2: Two clusters - X[:, 0] <= 5 vs X[:, 0] > 5
+                cluster_ids = (x_first_feature > 5).astype(int)
+            elif self.setting == 3:
+                # Setting 3: Three clusters - X[:, 0] <= 3, (3,6], X[:, 0] > 6
+                cluster_ids = np.zeros(len(x_first_feature), dtype=int)
+                cluster_ids[x_first_feature <= 3] = 0
+                cluster_ids[(x_first_feature > 3) & (x_first_feature <= 6)] = 1
+                cluster_ids[x_first_feature > 6] = 2
+                
+        elif self.setting in [4, 5]:
+            # High-dimensional settings use true cluster assignments from metadata
+            if self.meta is None or 'clusters' not in self.meta:
+                raise ValueError(f"Setting {self.setting} requires metadata with true cluster assignments.")
+            
+            if indices is None:
+                raise ValueError(f"Setting {self.setting} requires original data indices to map cluster assignments.")
+            
+            # Extract the cluster assignments for the given indices
+            cluster_ids = self.meta['clusters'][indices]
+            
         else:
-            raise ValueError(f"Unknown setting: {self.setting}. Supported settings are 1, 2, 3.")
+            raise ValueError(f"Unknown setting: {self.setting}. Supported settings are 1, 2, 3, 4, 5.")
             
         return cluster_ids.tolist()
     
-    def fit_clusters(self, X_val, R_val):
+    def fit_clusters(self, X_val, R_val, val_indices=None):
         """Fit clusters on validation data using ground truth clustering"""
         # Use ground truth clustering based on data generation process
-        cluster_ids = self._get_ground_truth_clusters(X_val)
+        cluster_ids = self._get_ground_truth_clusters(X_val, val_indices)
         
         # Store residuals by cluster
         self.cluster_residuals = {}
@@ -130,15 +100,16 @@ class ClusterwiseOracle:
         for cluster_id in self.cluster_residuals:
             self.cluster_residuals[cluster_id] = np.array(self.cluster_residuals[cluster_id])
     
-    def calibrate(self, X_val, R_val, X_test, R_test, predictions_test, alpha):
+    def calibrate(self, X_val, R_val, X_test, R_test, predictions_test, alpha, 
+                  val_indices=None, test_indices=None):
         """Generate prediction intervals using cluster-wise oracle method"""
-        self.fit_clusters(X_val, R_val)
+        self.fit_clusters(X_val, R_val, val_indices)
         
         quantiles = []
         coverage = []
         
         # Get cluster assignments for test points using ground truth
-        test_cluster_ids = self._get_ground_truth_clusters(X_test)
+        test_cluster_ids = self._get_ground_truth_clusters(X_test, test_indices)
         
         for i, cluster_id in enumerate(test_cluster_ids):
             # Get residuals for this cluster
@@ -167,8 +138,31 @@ def run_simulation(num_samples=1200, alpha=0.1, setting=1, random_seed=42, n_tre
     
     np.random.seed(random_seed)
     
-    X, Y = simulate_data(num_samples, setting)
-    X_train, X_val, X_test, Y_train, Y_val, Y_test, X_val_0, X_test_0 = train_val_test_split(X, Y, p=1/4, p2=1/4)
+    # For settings 4 and 5, we need the metadata containing true cluster assignments
+    if setting in [4, 5]:
+        X, Y, meta = simulate_data(num_samples, setting, return_meta=True, random_state=random_seed)
+    else:
+        X, Y = simulate_data(num_samples, setting)
+        meta = None
+        
+    if setting in [4, 5]:
+        # For high-dimensional settings, we need the indices to map cluster assignments
+        # First get the normal split
+        X_train, X_val, X_test, Y_train, Y_val, Y_test, X_val_0, X_test_0 = train_val_test_split(X, Y, p=1/4, p2=1/4, random_state=random_seed)
+        
+        # Now get the indices by calling with return_index=True
+        _, _, _, _, _, _, _, idx_test = train_val_test_split(X, Y, p=1/4, p2=1/4, return_index=True, random_state=random_seed)
+        
+        # We need to compute idx_val manually
+        np.random.seed(random_seed)
+        n = X.shape[0]
+        train_size = int(n * 1/4)
+        val_size = int(n * 1/4)
+        indices = np.random.permutation(n)
+        idx_val = indices[train_size:train_size + val_size]
+    else:
+        X_train, X_val, X_test, Y_train, Y_val, Y_test, X_val_0, X_test_0 = train_val_test_split(X, Y, p=1/4, p2=1/4)
+        idx_val, idx_test = None, None
     
     print(f"Data split: Train={len(X_train)}, Val={len(X_val)}, Test={len(X_test)}")
     
@@ -198,40 +192,37 @@ def run_simulation(num_samples=1200, alpha=0.1, setting=1, random_seed=42, n_tre
         'coverage_rate': np.mean(scp_coverage)
     }
     
-    # -- Naive Oracle Method
-    if False:
-        print("-- Running Naive Oracle...")
-        naive_oracle = NaiveOracle()
-        naive_quantiles, naive_coverage = naive_oracle.calibrate(X_val, R_val, X_test, R_test, 
-                                                                predictions_test, alpha)
-        
-        results['Naive Oracle'] = {
-            'quantiles': naive_quantiles,
-            'coverage': naive_coverage,
-            'avg_length': np.mean(naive_quantiles) * 2,
-            'coverage_rate': np.mean(naive_coverage)
-        }
-    
     # --Cluster-wise Oracle Method
     print("-- Running Cluster-wise Oracle...")
-    cluster_oracle = ClusterwiseOracle(setting=setting)
-    cluster_quantiles, cluster_coverage = cluster_oracle.calibrate(X_val_0, R_val, X_test_0, R_test,
-                                                                predictions_test, alpha)
+    cluster_oracle = ClusterwiseOracle(setting=setting, meta=meta)
+    cluster_quantiles, cluster_coverage = cluster_oracle.calibrate(
+        X_val_0, R_val, X_test_0, R_test, predictions_test, alpha,
+        val_indices=idx_val, test_indices=idx_test)
     
     # show cluster information using original features
-    val_clusters = cluster_oracle._get_ground_truth_clusters(X_val_0)
+    val_clusters = cluster_oracle._get_ground_truth_clusters(X_val_0, idx_val)
     unique_clusters, cluster_counts = np.unique(val_clusters, return_counts=True)
     print(f"   Validation clusters found: {len(unique_clusters)} clusters")
     for cluster_id, count in zip(unique_clusters, cluster_counts):
         print(f"   Cluster {cluster_id}: {count} samples")
-    print(f"   X_val_0 first feature range: [{X_val_0[:, 0].min():.2f}, {X_val_0[:, 0].max():.2f}]")
     
-    test_clusters = cluster_oracle._get_ground_truth_clusters(X_test_0)
+    if setting in [1, 2, 3]:
+        print(f"   X_val_0 first feature range: [{X_val_0[:, 0].min():.2f}, {X_val_0[:, 0].max():.2f}]")
+    
+    test_clusters = cluster_oracle._get_ground_truth_clusters(X_test_0, idx_test)
     unique_test_clusters, test_cluster_counts = np.unique(test_clusters, return_counts=True)
     print(f"   Test clusters found: {len(unique_test_clusters)} clusters")
     for cluster_id, count in zip(unique_test_clusters, test_cluster_counts):
         print(f"   Test Cluster {cluster_id}: {count} samples")
-    print(f"   X_test_0 first feature range: [{X_test_0[:, 0].min():.2f}, {X_test_0[:, 0].max():.2f}]")
+    
+    if setting in [1, 2, 3]:
+        print(f"   X_test_0 first feature range: [{X_test_0[:, 0].min():.2f}, {X_test_0[:, 0].max():.2f}]")
+    elif setting in [4, 5]:
+        print(f"   X_val_0 shape: {X_val_0.shape}, X_test_0 shape: {X_test_0.shape}")
+        if meta is not None:
+            print(f"   Total clusters in metadata: {len(np.unique(meta['clusters']))}")
+            print(f"   Cluster distribution in val: {dict(zip(*np.unique(val_clusters, return_counts=True)))}")
+            print(f"   Cluster distribution in test: {dict(zip(*np.unique(test_clusters, return_counts=True)))}")
 
     results['Cluster-wise Oracle'] = {
         'quantiles': cluster_quantiles,
@@ -262,109 +253,12 @@ def run_simulation(num_samples=1200, alpha=0.1, setting=1, random_seed=42, n_tre
     return results, X_test_0, Y_test, predictions_test
 
 
-def print_results(results, alpha):
-    """Print comparison results"""
-    print(f"\n{'='*70}")
-    print("SIMULATION RESULTS")
-    print(f"{'='*70}")
-    print(f"Target coverage: {1-alpha:.1%}")
-    print(f"{'Method':<20} {'Coverage Rate':<15} {'Avg Length':<15} {'Efficiency':<10}")
-    print("-" * 70)
-    
-    baseline_length = None
-    for method_name, result in results.items():
-        coverage_rate = result['coverage_rate']
-        avg_length = result['avg_length']
-        
-        if baseline_length is None:
-            baseline_length = avg_length
-            efficiency = 1.0
-        else:
-            efficiency = baseline_length / avg_length if avg_length > 0 else float('inf')
-        
-        print(f"{method_name:<20} {coverage_rate:<15.3f} {avg_length:<15.3f} {efficiency:<10.3f}")
-    
-    print("-" * 70)
-
-
-def plot_results(results, X_test_0, Y_test, predictions_test, feature_idx=0, 
-                 num_samples=None, n_tree=None, seed=None, setting=None):
-    """Plot prediction intervals for visual comparison"""
-    
-    # Sort by feature for better visualization
-    sort_idx = np.argsort(X_test_0[:, feature_idx])
-    x_vals = X_test_0[sort_idx, feature_idx]
-    y_vals = Y_test[sort_idx]
-    pred_vals = predictions_test[sort_idx]
-    
-    # Filter out failed methods for plotting
-    plot_results_dict = {k: v for k, v in results.items() if not k.endswith('(Failed)')}
-    n_methods = len(plot_results_dict)
-    
-    # Determine subplot layout
-    if n_methods == 2:
-        fig, axes = plt.subplots(1, 2, figsize=(12, 6))
-        axes = axes.flatten()
-    elif n_methods <= 4:
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-        axes = axes.flatten()
-    else:
-        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-        axes = axes.flatten()
-    
-    colors = ['red', 'blue', 'green', 'purple', 'orange', 'brown']
-    
-    for i, (method_name, result) in enumerate(plot_results_dict.items()):
-        if i >= len(axes):
-            break
-            
-        ax = axes[i]
-        
-        quantiles_sorted = np.array(result['quantiles'])[sort_idx]
-        
-        # Handle infinite quantiles for display
-        finite_mask = np.isfinite(quantiles_sorted)
-        if np.any(finite_mask):
-            max_finite_quantile = np.max(quantiles_sorted[finite_mask]) * 1.5
-            quantiles_sorted = np.where(np.isfinite(quantiles_sorted), quantiles_sorted, max_finite_quantile)
-        
-        lower_bounds = pred_vals - quantiles_sorted
-        upper_bounds = pred_vals + quantiles_sorted
-        
-        # Plot data points and prediction intervals
-        ax.scatter(x_vals, y_vals, alpha=0.4, s=8, color='gray', label='True values')
-        ax.fill_between(x_vals, lower_bounds, upper_bounds, alpha=0.3, color=colors[i % len(colors)])
-        ax.plot(x_vals, pred_vals, 'k--', alpha=0.7, label='Predictions', linewidth=1)
-        
-        avg_length = result["avg_length"] if np.isfinite(result["avg_length"]) else "∞"
-        ax.set_title(f'{method_name}\nCoverage: {result["coverage_rate"]:.3f}, Length: {avg_length}')
-        ax.set_xlabel(f'Feature {feature_idx}')
-        ax.set_ylabel('Response')
-        ax.legend(fontsize=8)
-        ax.grid(True, alpha=0.3)
-    
-    # Hide unused subplots
-    for j in range(i + 1, len(axes)):
-        axes[j].set_visible(False)
-    
-    outpath = OUTPATH_FIG.format(num_samples=num_samples)
-    if n_tree is not None:
-        outpath = outpath.replace('.png', f'_ntree{n_tree}.png')
-    if seed is not None:
-        outpath = outpath.replace('.png', f'_seed{seed}.png')
-    if setting is not None:
-        outpath = outpath.replace('out/', f'out/setting{setting}/')
-    plt.tight_layout()
-    plt.savefig(outpath, dpi=150, bbox_inches='tight')
-    plt.show()
-
-
 def main():
     """Main simulation function"""
     # Simulation parameters
     num_samples = 2000
     alpha = 0.1
-    setting = 3
+    setting = 5  # Test the new high-dimensional setting with block-wise clusters
     random_seed = 42
     n_tree = 100
     
@@ -402,8 +296,7 @@ def main():
             print(f"- {name}: {result['coverage_rate']:.3f} coverage (+{cov_diff:+.3f}), "
                   f"{len_ratio:.2f}x length efficiency")
     
-    print(f"- Naive Oracle shows performance with global (non-conditional) scoring")
-    print(f"- Cluster-wise Oracle conditions on discrete feature bins")
+    print(f"- Cluster-wise Oracle conditions on true clusters from data generation")
     if 'PCP' in results:
         print(f"- PCP uses complete posterior conformal prediction methodology")
     else:
