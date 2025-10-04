@@ -1,3 +1,4 @@
 ref*/
 __pycache__/
 archive/
+*.ipynb

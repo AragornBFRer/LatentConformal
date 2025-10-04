@@ -1063,6 +1063,30 @@ def P_score(prob, Y):
 def train_val_test_split(X, Y, p, p2=None, return_index=False, random_state=None):
     """
     Splits the data into training, validation, and test sets and standardizes the features.
+
+    Args
+    ----
+    p : float
+        Proportion of the data to be used for the training set (between 0 and 1).
+    p2 : float, optional
+        Proportion of the data to be used for the validation set (between 0 and 1).
+        If None, it is set to the same value as p.
+    return_index : bool, optional
+        If True, returns the indices of the validation and test sets. Default is False.
+
+    Returns
+    -------
+    X_train, X_val, X_test, Y_train, Y_val, Y_test : numpy array
+
+    X_val_0 : numpy array
+        Original (non-standardized) validation feature matrix.
+    X_test_0 : numpy array
+        Original (non-standardized) test feature matrix.
+    
+    idx_val : numpy array, optional
+        Indices of the validation set.
+    idx_test : numpy array, optional
+        Indices of the test set.
     """
     if random_state is not None:
         np.random.seed(random_state)
@@ -1101,10 +1125,9 @@ def train_val_test_split(X, Y, p, p2=None, return_index=False, random_state=None
     X_test = scaler.transform(X_test_0)
 
     if return_index:
-        # Return the standardized data along with the original test set and test indices
-        return X_train, X_val, X_test, Y_train, Y_val, Y_test, X_test_0, idx_test
+        # with the indices
+        return X_train, X_val, X_test, Y_train, Y_val, Y_test, X_val_0, idx_val, X_test_0, idx_test
     else:
-        # Return the standardized data along with the original validation and test sets
         return X_train, X_val, X_test, Y_train, Y_val, Y_test, X_val_0, X_test_0
 
 
@@ -1237,10 +1260,6 @@ def simulate_data(num_samples,
 
         return X_out, Y
 
-    # --- settings 4 & 5: simplified high-dimensional setups ---
-    if setting not in (4, 5):
-        raise ValueError("Unsupported setting. Choose setting in {1,2,3,4,5}.")
-
     # simple feature matrix: iid standard normal columns
     X_hd = rng.standard_normal((num_samples, p))
 
@@ -1249,6 +1268,7 @@ def simulate_data(num_samples,
 
     betas = np.zeros((K, p))
 
+    # --- settings 4 & 5: simplified high-dimensional setups ---
     if setting == 4:
         # Clustered sparse linear model
         supports = []
@@ -1267,7 +1287,7 @@ def simulate_data(num_samples,
         X_out = X_hd
         meta = {'betas': betas, 'supports': supports, 'clusters': clusters}
 
-    else:  # setting == 5
+    if setting == 5:  # setting == 5
         # Block-wise active features / group-sparse clusters
         if block_size is None:
             # choose about 10 blocks or at least size 1
@@ -1291,6 +1311,83 @@ def simulate_data(num_samples,
 
         X_out = X_hd
         meta = {'betas': betas, 'active_blocks': active_blocks_list, 'blocks': blocks, 'clusters': clusters}
+
+
+    # --- setting 6 & 7: cluster by ||X||_2 and make Y depend on magnitude, with very different noise scales ---
+    if setting in (6, 7):
+        X_out = X_hd
+        
+        # compute L2 norms
+        norms = np.linalg.norm(X_hd, axis=1)  # shape (n,)
+        min_norm, max_norm = float(norms.min()), float(norms.max())
+
+        # define equal-width bin edges from min to max into K bins
+        # if all norms are equal (degenerate), put everything into cluster 0
+        if max_norm - min_norm < 1e-12:
+            cluster_by_norm = np.zeros(num_samples, dtype=int)
+            edges = np.array([min_norm, max_norm])
+        else:
+            edges = np.linspace(min_norm, max_norm, num=K + 1)
+            # digitize into 0..K-1
+            # np.digitize returns 1..len(bins) with bins as edges[1:-1]; transform to 0..K-1
+            cluster_by_norm = np.digitize(norms, bins=edges[1:-1], right=True)
+            # cluster_by_norm already in 0..K-1
+
+        # Create widely-varying noise scales across clusters (use logspace for big differences)
+        # base sigma is multiplied by these factors to produce per-cluster noise std.
+        log_factors = np.logspace(-1, 1, num=K)  # factors from 0.1 .. 10 (vary a lot)
+        # Add a little random jitter so different seeds produce slightly different factor ordering
+        jitter = rng.uniform(0.8, 1.2, size=K)
+        noise_factors = log_factors * jitter
+        noise_scales = sigma * noise_factors  # final per-cluster noise stds
+
+        # cluster-level offsets / multipliers for the deterministic part
+        # keep them modest so magnitude remains the main driver
+        cluster_offsets = rng.normal(loc=0.0, scale=0.5, size=K)
+        cluster_multipliers = rng.normal(loc=1.0, scale=0.25, size=K)
+
+    # Construct Y for setting 6 (linear in norm) and 7 (nonlinear)
+    if setting == 6:
+        # linear relation: Y = a + b * ||X||_2 * multiplier(cluster) + offset(cluster) + noise(cluster)
+        a = 0.5  # global intercept
+        b = 2.0  # slope for the norm
+        linear_signal = a + b * norms * cluster_multipliers[cluster_by_norm] + cluster_offsets[cluster_by_norm]
+        noise = rng.normal(loc=0.0, scale=noise_scales[cluster_by_norm], size=num_samples)
+        Y = linear_signal + noise
+
+        meta = {
+            'norms': norms,
+            'cluster_edges': edges,
+            'clusters': cluster_by_norm,  # For backward compatibility
+            'clusters_by_norm': cluster_by_norm,
+            'noise_scales': noise_scales,
+            'cluster_offsets': cluster_offsets,
+            'cluster_multipliers': cluster_multipliers,
+            'setting_description': 'linear-in-norm with widely varying cluster noise scales'
+        }
+
+    if setting == 7:  # setting == 7
+        # nonlinear relation: e.g. sinusoidal in normalized norm plus a magnitude-based trend:
+        # Y = (sin(pi * norm / max_norm) + 0.3 * (norm / max_norm)**0.5) * (1 + small cluster multiplier) + offset + noise
+        # normalize norms to [0,1] using max_norm (if max_norm==0 use 1)
+        denom = max_norm if max_norm > 0 else 1.0
+        norm_unit = norms / denom
+        nonlinear_signal = (np.sin(np.pi * norm_unit) + 0.3 * np.sqrt(np.maximum(norm_unit, 0))) \
+                           * (1.0 + 0.5 * cluster_multipliers[cluster_by_norm]) \
+                           + cluster_offsets[cluster_by_norm]
+        noise = rng.normal(loc=0.0, scale=noise_scales[cluster_by_norm], size=num_samples)
+        Y = nonlinear_signal + noise
+
+        meta = {
+            'norms': norms,
+            'cluster_edges': edges,
+            'clusters': cluster_by_norm,  # For backward compatibility
+            'clusters_by_norm': cluster_by_norm,
+            'noise_scales': noise_scales,
+            'cluster_offsets': cluster_offsets,
+            'cluster_multipliers': cluster_multipliers,
+            'setting_description': 'nonlinear-in-norm (sin + sqrt trend) with widely varying cluster noise scales'
+        }
 
     if return_meta:
         return X_out, Y, meta

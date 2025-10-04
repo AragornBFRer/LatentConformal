@@ -43,10 +43,12 @@ class ClusterwiseOracle:
         - Setting 3: Three clusters based on X[:, 0] <= 3, (3,6], X[:, 0] > 6
         - Setting 4: Clustered sparse linear model - uses true cluster assignments from metadata
         - Setting 5: Block-wise clusters - uses true cluster assignments from metadata
+        - Setting 6: Norm-based clusters (linear in norm) - uses true cluster assignments from metadata
+        - Setting 7: Norm-based clusters (nonlinear in norm) - uses true cluster assignments from metadata
         
         Args:
             X: Feature matrix (may be standardized)
-            indices: Original indices in the full dataset (for settings 4-5)
+            indices: Original indices in the full dataset (for settings 4-5, 6-7)
         """
         if self.setting in [1, 2, 3]:
             # Original settings use feature-based clustering
@@ -68,8 +70,8 @@ class ClusterwiseOracle:
                 cluster_ids[(x_first_feature > 3) & (x_first_feature <= 6)] = 1
                 cluster_ids[x_first_feature > 6] = 2
                 
-        elif self.setting in [4, 5]:
-            # High-dimensional settings use true cluster assignments from metadata
+        elif self.setting in [4, 5, 6, 7]:
+            # High-dimensional settings (4,5) and norm-based settings (6,7) use true cluster assignments from metadata
             if self.meta is None or 'clusters' not in self.meta:
                 raise ValueError(f"Setting {self.setting} requires metadata with true cluster assignments.")
             
@@ -80,7 +82,7 @@ class ClusterwiseOracle:
             cluster_ids = self.meta['clusters'][indices]
             
         else:
-            raise ValueError(f"Unknown setting: {self.setting}. Supported settings are 1, 2, 3, 4, 5.")
+            raise ValueError(f"Unknown setting: {self.setting}. Supported settings are 1, 2, 3, 4, 5, 6, 7.")
             
         return cluster_ids.tolist()
     
@@ -131,43 +133,69 @@ class ClusterwiseOracle:
         return quantiles, coverage
 
 
-def run_simulation(num_samples=1200, alpha=0.1, setting=1, random_seed=42, n_tree=100,
-                   pcp_fold=20, pcp_grid=20):
-    """Run the complete simulation comparing all methods"""
+def run_simulation(num_samples=1200, alpha=0.1, setting=1, random_seed=42, pcp_fold=20, pcp_grid=20,
+                   p=50, K=3, s=5, num_active_blocks=2, block_size=None, sigma=1.0, 
+                   n_estimators=100, max_features='sqrt', max_depth=None, min_samples_leaf=5, min_samples_split=10, n_jobs=-1,
+                   train_ratio=0.25, val_ratio=0.25):
+    """Run the complete simulation comparing all methods
+
+    Args:
+        num_samples : int
+            Number of samples to generate.
+        setting : int
+            Which setting to use (1..7).
+        p : int, optional
+            Number of features (for settings 4, 5, 6, 7). Default is 50.
+        K : int, optional
+            Number of clusters (for settings 4, 5, 6, 7). Default is 3.
+        s : int, optional
+            Number of active features per cluster (for setting 4). Default is 5.
+        num_active_blocks : int, optional
+            Number of active blocks per cluster (for setting 5). Default is 2.
+        block_size : int or None, optional
+            Block size (for setting 5). If None, choose automatically. Default is None.
+        sigma : float, optional
+            Noise standard deviation (for settings 4, 5, 6, 7). Default is 1.0.
+        random_seed : int or None, optional
+            Random seed for reproducibility. Default is None.
+    
+    Returns:
+        results : dict
+            Dictionary containing results for each method.
+        X_test_0 : np.ndarray
+            Original test features (before standardization).
+        Y_test : np.ndarray
+            True test responses.
+        predictions_test : np.ndarray
+            Model predictions on test set.
+    """
     print(f"Running simulation with {num_samples} samples, alpha={alpha}, setting={setting}")
     print("=" * 70)
     
     np.random.seed(random_seed)
     
-    # For settings 4 and 5, we need the metadata containing true cluster assignments
-    if setting in [4, 5]:
-        X, Y, meta = simulate_data(num_samples, setting, return_meta=True, random_state=random_seed)
+    # For settings 4, 5, 6, and 7, we need the metadata containing true cluster assignments
+    if setting in [4, 5, 6, 7]:
+        X, Y, meta = simulate_data(num_samples, setting, return_meta=True, random_state=random_seed,
+                                   p=p, K=K, s=s, num_active_blocks=num_active_blocks, block_size=block_size, sigma=sigma)
     else:
         X, Y = simulate_data(num_samples, setting)
         meta = None
         
-    if setting in [4, 5]:
-        # For high-dimensional settings, we need the indices to map cluster assignments
-        # First get the normal split
-        X_train, X_val, X_test, Y_train, Y_val, Y_test, X_val_0, X_test_0 = train_val_test_split(X, Y, p=1/4, p2=1/4, random_state=random_seed)
-        
-        # Now get the indices by calling with return_index=True
-        _, _, _, _, _, _, _, idx_test = train_val_test_split(X, Y, p=1/4, p2=1/4, return_index=True, random_state=random_seed)
-        
-        # We need to compute idx_val manually
-        np.random.seed(random_seed)
-        n = X.shape[0]
-        train_size = int(n * 1/4)
-        val_size = int(n * 1/4)
-        indices = np.random.permutation(n)
-        idx_val = indices[train_size:train_size + val_size]
+    if setting in [4, 5, 6, 7]:
+        X_train, X_val, X_test, Y_train, Y_val, Y_test, \
+        X_val_0, idx_val, X_test_0, idx_test = train_val_test_split(X, Y, \
+                                                                    p=train_ratio, p2=val_ratio, \
+                                                                    return_index=True, random_state=random_seed)
     else:
-        X_train, X_val, X_test, Y_train, Y_val, Y_test, X_val_0, X_test_0 = train_val_test_split(X, Y, p=1/4, p2=1/4)
+        X_train, X_val, X_test, Y_train, Y_val, Y_test, X_val_0, X_test_0 = train_val_test_split(X, Y, p=train_ratio, p2=val_ratio, random_state=random_seed)
         idx_val, idx_test = None, None
     
     print(f"Data split: Train={len(X_train)}, Val={len(X_val)}, Test={len(X_test)}")
-    
-    RF = RandomForestRegressor(random_state=random_seed, n_estimators=n_tree)
+
+    RF = RandomForestRegressor(random_state=random_seed, n_estimators=n_estimators, max_features=max_features,
+                               max_depth=max_depth, min_samples_leaf=min_samples_leaf,
+                               min_samples_split=min_samples_split, n_jobs=n_jobs)
     RF.fit(X_train, Y_train)
     
     # Get predictions and residuals
@@ -193,7 +221,7 @@ def run_simulation(num_samples=1200, alpha=0.1, setting=1, random_seed=42, n_tre
         'coverage_rate': np.mean(scp_coverage)
     }
     
-    # --Cluster-wise Oracle Method
+    # -- Cluster-wise Oracle Method
     print("-- Running Cluster-wise Oracle...")
     cluster_oracle = ClusterwiseOracle(setting=setting, meta=meta)
     cluster_quantiles, cluster_coverage = cluster_oracle.calibrate(
@@ -204,26 +232,12 @@ def run_simulation(num_samples=1200, alpha=0.1, setting=1, random_seed=42, n_tre
     val_clusters = cluster_oracle._get_ground_truth_clusters(X_val_0, idx_val)
     unique_clusters, cluster_counts = np.unique(val_clusters, return_counts=True)
     print(f"   Validation clusters found: {len(unique_clusters)} clusters")
-    for cluster_id, count in zip(unique_clusters, cluster_counts):
-        print(f"   Cluster {cluster_id}: {count} samples")
-    
-    if setting in [1, 2, 3]:
-        print(f"   X_val_0 first feature range: [{X_val_0[:, 0].min():.2f}, {X_val_0[:, 0].max():.2f}]")
+    print(f"   Average cluster size: {np.mean(cluster_counts)}")
     
     test_clusters = cluster_oracle._get_ground_truth_clusters(X_test_0, idx_test)
     unique_test_clusters, test_cluster_counts = np.unique(test_clusters, return_counts=True)
     print(f"   Test clusters found: {len(unique_test_clusters)} clusters")
-    for cluster_id, count in zip(unique_test_clusters, test_cluster_counts):
-        print(f"   Test Cluster {cluster_id}: {count} samples")
-    
-    if setting in [1, 2, 3]:
-        print(f"   X_test_0 first feature range: [{X_test_0[:, 0].min():.2f}, {X_test_0[:, 0].max():.2f}]")
-    elif setting in [4, 5]:
-        print(f"   X_val_0 shape: {X_val_0.shape}, X_test_0 shape: {X_test_0.shape}")
-        if meta is not None:
-            print(f"   Total clusters in metadata: {len(np.unique(meta['clusters']))}")
-            print(f"   Cluster distribution in val: {dict(zip(*np.unique(val_clusters, return_counts=True)))}")
-            print(f"   Cluster distribution in test: {dict(zip(*np.unique(test_clusters, return_counts=True)))}")
+    print(f"   Average test cluster size: {np.mean(test_cluster_counts)}")
 
     results['Cluster-wise Oracle'] = {
         'quantiles': cluster_quantiles,
@@ -232,7 +246,7 @@ def run_simulation(num_samples=1200, alpha=0.1, setting=1, random_seed=42, n_tre
         'coverage_rate': np.mean(cluster_coverage)
     }
     
-    # PCP Method
+    # -- PCP Method
     print("-- Running PCP...")
     pcp_model = PCP(fold=pcp_fold, grid=pcp_grid)
     pcp_model.train(X_val, R_val, info=False)
@@ -259,7 +273,7 @@ def main():
     # Simulation parameters
     num_samples = 2000
     alpha = 0.1
-    setting = 5  # Test the new high-dimensional setting with block-wise clusters
+    setting = 6
     random_seed = 42
     n_tree = 100
     
