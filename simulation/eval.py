@@ -47,10 +47,8 @@ class ClusterwiseOracle:
 
         for i, cluster_id in enumerate(test_cluster_ids):
             residuals = self.cluster_residuals.get(int(cluster_id))
-            if residuals is None or residuals.size == 0:
-                raise ValueError(f"Cluster {cluster_id} not found in validation set.")
-            elif residuals.size == 1:
-                quantile = residuals[0]
+            if residuals is None or residuals.size <= 5:
+                raise ValueError(f"Cluster {cluster_id} not found in validation set or not sufficiently populated.")
             else:
                 quantile = np.quantile(residuals, 1 - alpha)
 
@@ -63,8 +61,7 @@ class ClusterwiseOracle:
 
 def run_simulation(num_samples=1200, alpha=0.1, random_seed=42, pcp_fold=20, pcp_grid=20,
                    K=3, d=2, mean_scale=4.0, temperature=1.0, cluster_spread=1.0, response_noise=0.5,
-                   deterministic_margin=0.2, n_estimators=200, max_features='sqrt', max_depth=None,
-                   min_samples_leaf=5, min_samples_split=10, n_jobs=-1,
+                   deterministic_margin=0.2, rf_params=None,
                    train_ratio=0.4, val_ratio=0.3):
     """Run the GMM-based simulation comparing SCP, Oracle, and PCP."""
 
@@ -93,12 +90,7 @@ def run_simulation(num_samples=1200, alpha=0.1, random_seed=42, pcp_fold=20, pcp
 
     rf = RandomForestRegressor(
         random_state=random_seed,
-        n_estimators=n_estimators,
-        max_features=max_features,
-        max_depth=max_depth,
-        min_samples_leaf=min_samples_leaf,
-        min_samples_split=min_samples_split,
-        n_jobs=n_jobs,
+        **(rf_params if rf_params is not None else {})
     )
     rf.fit(X_train, Y_train)
 
@@ -192,81 +184,3 @@ def run_simulation(num_samples=1200, alpha=0.1, random_seed=42, pcp_fold=20, pcp
 
     return results, X_test_0, Y_test, predictions_test, diagnostics
 
-
-def main():
-    """Main simulation function"""
-    # Simulation parameters
-    num_samples = 1500
-    alpha = 0.1
-    random_seed = 42
-    K = 3
-    d = 2
-    temperature = 1.0
-    n_estimators = 200
-    
-    print("Simulation Study: Comparing Conformal Prediction Methods")
-    print(f"Sample size: {num_samples}")
-    print(f"Alpha (significance level): {alpha}")
-    print(f"Gaussian mixture: K={K}, d={d}, temperature={temperature}")
-    
-    # Run simulation
-    results, X_test_0, Y_test, predictions_test, diagnostics = run_simulation(
-        num_samples=num_samples, 
-        alpha=alpha, 
-        random_seed=random_seed,
-        K=K,
-        d=d,
-        temperature=temperature,
-        n_estimators=n_estimators,
-    )
-    
-    # Print results
-    print_results(results, alpha)
-    
-    # Generate analysis
-    print(f"\n{'='*70}")
-    print("ANALYSIS")
-    print(f"{'='*70}")
-    
-    scp_coverage = results['SCP']['coverage_rate']
-    scp_length = results['SCP']['avg_length']
-    
-    print(f"- SCP (baseline): {scp_coverage:.3f} coverage, {scp_length:.1f} average length")
-    
-    for name, result in results.items():
-        if name != 'SCP':
-            cov_diff = result['coverage_rate'] - scp_coverage
-            len_ratio = scp_length / result['avg_length']
-            print(f"- {name}: {result['coverage_rate']:.3f} coverage (+{cov_diff:+.3f}), "
-                  f"{len_ratio:.2f}x length efficiency")
-    
-    print(f"- Cluster-wise Oracle conditions on true latent clusters")
-    if 'PCP' in results:
-        print(f"- PCP consumes externally supplied cluster labels (no k-means stage)")
-    else:
-        print(f"- PCP failed due to numerical instability with this sample size")
-
-    # Plot results
-    print(f"\nGenerating plots...")
-    plot_results(
-        results,
-        X_test_0,
-        Y_test,
-        predictions_test,
-        num_samples=num_samples,
-        n_tree=n_estimators,
-        seed=random_seed,
-        setting=f"gmm_K{K}_d{d}",
-        temperature=temperature,
-        true_clusters=diagnostics['true_clusters_test'],
-        ambiguous_mask=diagnostics['ambiguous_mask_test'],
-    )
-
-    out_fig = OUTPATH_FIG.format(num_samples=num_samples)
-    print(f"\nSimulation completed! Check '{out_fig}' for plots.")
-
-    return results
-
-
-if __name__ == "__main__":
-    results = main()

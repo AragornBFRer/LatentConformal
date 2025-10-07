@@ -9,7 +9,7 @@ from eval import run_simulation
 
 
 alpha = 0.1
-random_seed = 42
+random_seed = 17
 num_samples = 2000
 
 gmm_params = {
@@ -23,16 +23,18 @@ gmm_params = {
 }
 
 pcp_params = {
-    "pcp_fold": 20,
-    "pcp_grid": 15,
+    "pcp_fold": 10,
+    "pcp_grid": 20,
 }
 
 rf_params = {
-    "n_estimators": 500,
-    "max_features": "sqrt",
-    "max_depth": None,
-    "min_samples_leaf": 5,
+    "n_estimators": 500,         # more trees → stabler predictions
+    "max_features": "sqrt",      # good bias/variance tradeoff for many problems
+    "max_depth": None,           # let trees expand, regularized by min_samples_*
+    "min_samples_leaf": 5,       # prevents tiny leaves (reduces variance)
     "min_samples_split": 10,
+    "bootstrap": True,
+    "oob_score": True,           # use OOB to estimate generalization (no val split)
     "n_jobs": -1,
 }
 
@@ -53,9 +55,9 @@ results, X_test_0, Y_test, predictions_test, diagnostics = run_simulation(
     num_samples=num_samples,
     alpha=alpha,
     random_seed=random_seed,
+    rf_params=rf_params,
     **gmm_params,
     **pcp_params,
-    **rf_params,
     **split_params,
 )
 
