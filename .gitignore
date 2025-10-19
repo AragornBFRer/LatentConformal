@@ -2,3 +2,5 @@ ref*/
 __pycache__/
 archive/
 *.ipynb
+.vscode/
+.DS_Store
