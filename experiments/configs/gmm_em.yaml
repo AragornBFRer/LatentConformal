@@ -29,7 +29,7 @@ em_fit:
 
 model:
   ridge_alpha_oracle: 0.0
-  ridge_alpha_soft: 0.1
+  ridge_alpha_soft: 0.0
   ridge_alpha_ignore: 0.0
 
 io:

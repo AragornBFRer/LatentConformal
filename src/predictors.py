@@ -19,14 +19,16 @@ def _ensure_2d(arr: np.ndarray) -> np.ndarray:
 
 
 def _solve_linear(design: np.ndarray, target: np.ndarray, ridge_alpha: float) -> np.ndarray:
-    if ridge_alpha <= 0.0 or design.shape[1] <= 1:
-        sol, *_ = np.linalg.lstsq(design, target, rcond=None)
-        return sol
-    d = design.shape[1]
-    penalty = np.sqrt(ridge_alpha) * np.eye(d - 1)
-    aug_design = np.vstack([design, np.hstack([np.zeros((d - 1, 1)), penalty])])
-    aug_target = np.concatenate([target, np.zeros(d - 1)])
-    sol, *_ = np.linalg.lstsq(aug_design, aug_target, rcond=None)
+    gram = design.T @ design
+    rhs = design.T @ target
+    if ridge_alpha > 0.0 and design.shape[1] > 1:
+        penalty = ridge_alpha * np.eye(design.shape[1])
+        penalty[0, 0] = 0.0  # leave the intercept unpenalized
+        gram = gram + penalty
+    try:
+        sol = np.linalg.solve(gram, rhs)
+    except np.linalg.LinAlgError:
+        sol = np.linalg.pinv(gram) @ rhs
     return sol
 
 
