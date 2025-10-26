@@ -377,50 +377,6 @@ def _plot_scatter_relationships(df: pd.DataFrame, out_dir: Path) -> None:
     plt.close(fig)
 
 
-def _plot_len_ratio_heatmap(df: pd.DataFrame, out_dir: Path) -> None:
-    grouped = list(df.groupby("use_x_in_em"))
-    if not grouped:
-        return
-
-    agg = df.groupby(["use_x_in_em", "delta", "rho"])["len_ratio_soft"].mean()
-    delta_from_one = (agg - 1.0).abs()
-    max_abs = float(delta_from_one.max()) if not delta_from_one.empty else 0.0
-    vmax = max(max_abs, 1e-6)
-
-    n_cols = len(grouped)
-    fig, axes = plt.subplots(1, n_cols, figsize=(4.2 * n_cols, 3.6), squeeze=False)
-    axes = axes[0]
-
-    for idx, (use, group) in enumerate(grouped):
-        pivot = (
-            group.groupby(["delta", "rho"])["len_ratio_soft"].mean()
-            .sort_index()
-            .unstack("rho")
-            .sort_index(axis=1)
-        )
-        sns.heatmap(
-            pivot,
-            annot=True,
-            fmt=".2f",
-            cmap="coolwarm",
-            center=1.0,
-            vmin=1.0 - vmax,
-            vmax=1.0 + vmax,
-            cbar=idx == n_cols - 1,
-            cbar_kws={"label": "Mean soft/oracle length ratio"},
-            ax=axes[idx],
-        )
-        axes[idx].set_title(f"Soft length ratio\n{USE_LABEL[use]}")
-        axes[idx].set_xlabel("ρ")
-        axes[idx].set_ylabel("δ")
-
-    fig.suptitle("Soft length ratio vs separation (δ) and correlation (ρ)", fontsize=13, y=0.98)
-    fig.tight_layout(rect=[0, 0, 1, 0.94])
-    ensure_dir(out_dir)
-    fig.savefig(Path(out_dir) / "len_ratio_heatmap.png", dpi=300)
-    plt.close(fig)
-
-
 def _plot_em_diagnostics(df: pd.DataFrame, out_dir: Path) -> None:
     fig, ax = plt.subplots(figsize=(6, 4))
     sns.histplot(df["em_iter"], bins=20, kde=False, ax=ax, color="#4c72b0")
@@ -474,5 +430,4 @@ def generate_all_plots(results_csv: str | Path, out_dir: str | Path, alpha: floa
 
     _plot_imputation_metrics(df, output_dir)
     _plot_scatter_relationships(df, output_dir)
-    # _plot_len_ratio_heatmap(df, output_dir)
     _plot_em_diagnostics(df, output_dir)
