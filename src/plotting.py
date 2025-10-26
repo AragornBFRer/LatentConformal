@@ -30,6 +30,24 @@ IMPUTATION_LABELS = {
     "mean_max_tau": "Mean max responsibility",
     "z_feature_mse": "Z-feature MSE",
 }
+AXIS_LABELS = {
+    "delta": "Mixture separation δ",
+    "b_scale": "Latent effect scale ||b||",
+    "sigma_y": "Outcome noise σ_y",
+    "rho": "Responsibility correlation ρ",
+}
+STYLE_DESCRIPTIONS = {
+    "b_label": "Marker encodes latent scale ||b||",
+    "sigma_label": "Marker encodes outcome noise σ_y",
+    "delta_label": "Marker encodes mixture separation δ",
+    "rho_label": "Marker encodes responsibility correlation ρ",
+}
+STYLE_FIELD_MAP = {
+    "b_label": "b_scale",
+    "sigma_label": "sigma_y",
+    "delta_label": "delta",
+    "rho_label": "rho",
+}
 
 
 @dataclass(frozen=True)
@@ -40,6 +58,7 @@ class MetricSpec:
     title: str
     label_map: Dict[str, str] | None = None
     scalar_label: str | None = None
+    x_candidates: List[str] | None = None
 
 
 def _melt_metrics(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
@@ -77,8 +96,17 @@ def _prepare_tidy(df: pd.DataFrame, spec: MetricSpec) -> pd.DataFrame:
 
     tidy["use_label"] = tidy["use_x_in_em"].map(USE_ROW_LABEL)
     tidy["panel"] = tidy.apply(_panel_label, axis=1)
-    tidy["b_label"] = tidy["b_scale"].map(lambda v: f"||b||={v}")
-    tidy.sort_values(["panel", "use_label", "variant", "b_label", "delta"], inplace=True)
+    if "b_scale" in tidy.columns:
+        tidy["b_label"] = tidy["b_scale"].map(lambda v: f"||b||={v}")
+    if "sigma_y" in tidy.columns:
+        tidy["sigma_label"] = tidy["sigma_y"].map(lambda v: f"σ_y={v}")
+    if "delta" in tidy.columns:
+        tidy["delta_label"] = tidy["delta"].map(lambda v: f"δ={v}")
+    if "rho" in tidy.columns:
+        tidy["rho_label"] = tidy["rho"].map(lambda v: f"ρ={v}")
+    sort_cols = [col for col in ["panel", "use_label", "variant", "sigma_y", "b_scale", "delta"] if col in tidy.columns]
+    if sort_cols:
+        tidy.sort_values(sort_cols, inplace=True)
     return tidy
 
 
@@ -97,6 +125,23 @@ def _factor_grid(n: int) -> tuple[int, int]:
     return best_rows, best_cols
 
 
+def _choose_axis_field(tidy: pd.DataFrame, candidates: List[str] | None) -> str:
+    if candidates:
+        for field in candidates:
+            if field in tidy.columns and tidy[field].nunique() > 1:
+                return field
+    if "delta" in tidy.columns:
+        return "delta"
+    for fallback in ["b_scale", "sigma_y", "rho"]:
+        if fallback in tidy.columns:
+            return fallback
+    excluded = {"value", "variant", "use_label", "panel", "b_label", "sigma_label", "delta_label", "rho_label"}
+    for col in tidy.columns:
+        if col not in excluded:
+            return col
+    return "value"
+
+
 def _plot_metric_grid(tidy: pd.DataFrame, spec: MetricSpec, out_dir: Path, *, reference: float | None = None) -> None:
     if tidy.empty:
         return
@@ -104,14 +149,32 @@ def _plot_metric_grid(tidy: pd.DataFrame, spec: MetricSpec, out_dir: Path, *, re
     panel_order = sorted(tidy["panel"].unique())
     use_order = list(dict.fromkeys(tidy["use_label"]))
     variant_order = list(dict.fromkeys(tidy["variant"]))
-    style_order = list(dict.fromkeys(tidy["b_label"]))
+    axis_field = _choose_axis_field(tidy, spec.x_candidates)
+    axis_label = AXIS_LABELS.get(axis_field, axis_field.replace("_", " ").title())
+
+    def _style_choice(df: pd.DataFrame) -> str | None:
+        alternatives = ["b_label", "sigma_label", "delta_label", "rho_label"]
+        # Prefer styles that vary and are not tied to the x-axis
+        for field in alternatives:
+            base_field = STYLE_FIELD_MAP.get(field, field)
+            if base_field == axis_field:
+                continue
+            if field in df.columns and df[field].nunique() > 1:
+                return field
+        return None
+
+    style_field = _style_choice(tidy)
+    style_order: List[str] = []
+    if style_field:
+        style_order = list(dict.fromkeys(tidy[style_field]))
 
     palette_base = sns.color_palette("tab10", max(len(variant_order), 3))
     variant_palette = {
         variant: palette_base[i % len(palette_base)] for i, variant in enumerate(variant_order)
     }
-
-    marker_map = {label: B_MARKERS[i % len(B_MARKERS)] for i, label in enumerate(style_order)}
+    marker_map: Dict[str, str] = {}
+    if style_order:
+        marker_map = {label: B_MARKERS[i % len(B_MARKERS)] for i, label in enumerate(style_order)}
 
     combos = [(use, panel) for use in use_order for panel in panel_order]
     n_panels = len(combos)
@@ -133,22 +196,34 @@ def _plot_metric_grid(tidy: pd.DataFrame, spec: MetricSpec, out_dir: Path, *, re
             ax.axis("off")
             continue
 
-        sns.lineplot(
-            data=subset,
-            x="delta",
-            y="value",
-            hue="variant",
-            hue_order=variant_order,
-            palette=variant_palette,
-            style="b_label",
-            style_order=style_order,
-            markers=marker_map,
-            dashes=False,
-            errorbar="sd",
-            ax=ax,
-            linewidth=1.8,
-            markersize=5.5,
-        )
+        subset = subset.sort_values(axis_field)
+
+        plot_kwargs = {
+            "data": subset,
+            "x": axis_field,
+            "y": "value",
+            "hue": "variant",
+            "hue_order": variant_order,
+            "palette": variant_palette,
+            "errorbar": "sd",
+            "ax": ax,
+            "linewidth": 1.8,
+            "dashes": False,
+        }
+
+        if style_field:
+            plot_kwargs.update(
+                {
+                    "style": style_field,
+                    "style_order": style_order,
+                    "markers": marker_map,
+                    "markersize": 5.5,
+                }
+            )
+        else:
+            plot_kwargs.update({"markers": False})
+
+        sns.lineplot(**plot_kwargs)
 
         if col == 0:
             ax.set_ylabel(spec.ylabel)
@@ -156,7 +231,7 @@ def _plot_metric_grid(tidy: pd.DataFrame, spec: MetricSpec, out_dir: Path, *, re
             ax.set_ylabel("")
 
         if row == n_rows - 1:
-            ax.set_xlabel("Mixture separation δ")
+            ax.set_xlabel(axis_label)
         else:
             ax.set_xlabel("")
 
@@ -182,18 +257,19 @@ def _plot_metric_grid(tidy: pd.DataFrame, spec: MetricSpec, out_dir: Path, *, re
         legend_handles.append(handle)
         legend_labels.append(f"{variant} (line color)")
 
-    for label in style_order:
-        handle = Line2D(
-            [0],
-            [0],
-            marker=marker_map[label],
-            color="#3c3c3c",
-            linestyle="",
-            markersize=7,
-            markerfacecolor="#3c3c3c",
-        )
-        legend_handles.append(handle)
-        legend_labels.append(f"{label} (marker)")
+    if style_order:
+        for label in style_order:
+            handle = Line2D(
+                [0],
+                [0],
+                marker=marker_map[label],
+                color="#3c3c3c",
+                linestyle="",
+                markersize=7,
+                markerfacecolor="#3c3c3c",
+            )
+            legend_handles.append(handle)
+            legend_labels.append(f"{label} (marker)")
 
     if reference is not None:
         legend_handles.append(
@@ -216,10 +292,14 @@ def _plot_metric_grid(tidy: pd.DataFrame, spec: MetricSpec, out_dir: Path, *, re
     )
 
     fig.suptitle(spec.title, fontsize=13, y=0.985)
+    footnote_parts = ["Line color identifies predictor"]
+    if style_field:
+        footnote_parts.append(STYLE_DESCRIPTIONS.get(style_field, "Marker encodes secondary parameter"))
+    footnote_parts.append("Shaded band is ±1 SD across seeds.")
     fig.text(
         0.5,
         0.955,
-        "Line color identifies predictor; marker denotes ||b||; shaded band is ±1 SD across seeds.",
+        "; ".join(footnote_parts),
         ha="center",
         va="center",
         fontsize=9,
@@ -232,8 +312,22 @@ def _plot_metric_grid(tidy: pd.DataFrame, spec: MetricSpec, out_dir: Path, *, re
 
 def _plot_imputation_metrics(df: pd.DataFrame, out_dir: Path) -> None:
     specs = [
-        MetricSpec("mean_max_tau", "Mean max responsibility", "mean_max_tau_vs_delta.png", "Mean max responsibility vs separation", scalar_label=IMPUTATION_LABELS["mean_max_tau"]),
-        MetricSpec("z_feature_mse", "Z-feature MSE", "z_feature_mse_vs_delta.png", "Z-feature MSE vs separation", scalar_label=IMPUTATION_LABELS["z_feature_mse"]),
+        MetricSpec(
+            "mean_max_tau",
+            "Mean max responsibility",
+            "mean_max_tau_vs_grid.png",
+            "Mean max responsibility across grid",
+            scalar_label=IMPUTATION_LABELS["mean_max_tau"],
+            x_candidates=["b_scale", "sigma_y", "delta"],
+        ),
+        MetricSpec(
+            "z_feature_mse",
+            "Z-feature MSE",
+            "z_feature_mse_vs_grid.png",
+            "Z-feature MSE across grid",
+            scalar_label=IMPUTATION_LABELS["z_feature_mse"],
+            x_candidates=["b_scale", "sigma_y", "delta"],
+        ),
     ]
 
     for spec in specs:
@@ -348,8 +442,22 @@ def generate_all_plots(results_csv: str | Path, out_dir: str | Path, alpha: floa
         raise ValueError("Results CSV is empty; nothing to plot")
 
     metric_specs = [
-        MetricSpec("coverage_", "Coverage", "coverage_vs_delta.png", "Coverage vs separation", label_map=VARIANT_LABELS),
-        MetricSpec("len_gap_", "Length gap vs oracle", "length_gap_vs_delta.png", "Length gap vs separation", label_map=VARIANT_LABELS),
+        MetricSpec(
+            "coverage_",
+            "Coverage",
+            "coverage_vs_grid.png",
+            "Coverage across parameter grid",
+            label_map=VARIANT_LABELS,
+            x_candidates=["b_scale", "sigma_y", "delta"],
+        ),
+        MetricSpec(
+            "len_gap_",
+            "Length gap vs oracle",
+            "length_gap_vs_grid.png",
+            "Length gap across parameter grid",
+            label_map=VARIANT_LABELS,
+            x_candidates=["b_scale", "sigma_y", "delta"],
+        ),
     ]
 
     reference = 1.0 - float(alpha) if alpha is not None else None
@@ -360,5 +468,5 @@ def generate_all_plots(results_csv: str | Path, out_dir: str | Path, alpha: floa
 
     _plot_imputation_metrics(df, output_dir)
     _plot_scatter_relationships(df, output_dir)
-    _plot_len_gap_heatmap(df, output_dir)
+    # _plot_len_gap_heatmap(df, output_dir)
     _plot_em_diagnostics(df, output_dir)
