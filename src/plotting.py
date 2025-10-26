@@ -3,22 +3,31 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
+
+import math
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
+
+from matplotlib.lines import Line2D
 
 from .utils import ensure_dir
 
 sns.set_theme(style="whitegrid")
 
 ID_COLS = ["seed", "K", "delta", "rho", "sigma_y", "b_scale", "use_x_in_em"]
+B_MARKERS = ["o", "s", "D", "^", "v", "P", "X", "*"]
 USE_LABEL = {False: "EM-R", True: "EM-RX"}
+USE_ROW_LABEL = {
+    False: "EM-R (R-only responsibilities)",
+    True: "EM-RX (R and X in EM)",
+}
 VARIANT_LABELS = {"oracle": "Oracle-Z", "soft": "EM-soft", "ignore": "Ignore-Z"}
 IMPUTATION_LABELS = {
     "mean_max_tau": "Mean max responsibility",
-    "cross_entropy": "Cross-entropy",
     "z_feature_mse": "Z-feature MSE",
 }
 
@@ -66,88 +75,164 @@ def _prepare_tidy(df: pd.DataFrame, spec: MetricSpec) -> pd.DataFrame:
             tidy["variant"].str.replace("_", " ").str.title()
         )
 
-    tidy["use_label"] = tidy["use_x_in_em"].map(USE_LABEL)
+    tidy["use_label"] = tidy["use_x_in_em"].map(USE_ROW_LABEL)
     tidy["panel"] = tidy.apply(_panel_label, axis=1)
     tidy["b_label"] = tidy["b_scale"].map(lambda v: f"||b||={v}")
     tidy.sort_values(["panel", "use_label", "variant", "b_label", "delta"], inplace=True)
     return tidy
 
 
+def _factor_grid(n: int) -> tuple[int, int]:
+    if n <= 0:
+        return (1, 1)
+    best_rows, best_cols = n, 1
+    for cols in range(1, int(math.sqrt(n)) + 1):
+        rows = math.ceil(n / cols)
+        area = rows * cols
+        best_area = best_rows * best_cols
+        diff = abs(rows - cols)
+        best_diff = abs(best_rows - best_cols)
+        if area < best_area or (area == best_area and diff < best_diff):
+            best_rows, best_cols = rows, cols
+    return best_rows, best_cols
+
+
 def _plot_metric_grid(tidy: pd.DataFrame, spec: MetricSpec, out_dir: Path, *, reference: float | None = None) -> None:
     if tidy.empty:
         return
 
-    g = sns.relplot(
-        data=tidy,
-        x="delta",
-        y="value",
-        hue="variant",
-        style="b_label",
-        col="use_label",
-        row="panel",
-        kind="line",
-        estimator="mean",
-        errorbar="sd",
-        facet_kws={"sharey": False, "sharex": True, "margin_titles": True},
-        markers=True,
-        dashes=False,
-        height=2.8,
-        aspect=1.35,
-        legend=True,
+    panel_order = sorted(tidy["panel"].unique())
+    use_order = list(dict.fromkeys(tidy["use_label"]))
+    variant_order = list(dict.fromkeys(tidy["variant"]))
+    style_order = list(dict.fromkeys(tidy["b_label"]))
+
+    palette_base = sns.color_palette("tab10", max(len(variant_order), 3))
+    variant_palette = {
+        variant: palette_base[i % len(palette_base)] for i, variant in enumerate(variant_order)
+    }
+
+    marker_map = {label: B_MARKERS[i % len(B_MARKERS)] for i, label in enumerate(style_order)}
+
+    combos = [(use, panel) for use in use_order for panel in panel_order]
+    n_panels = len(combos)
+    n_rows, n_cols = _factor_grid(n_panels)
+
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(n_cols * 4.0, n_rows * 2.6),
+        squeeze=False,
     )
 
-    g.set_axis_labels("Mixture separation δ", spec.ylabel)
-    g.set_titles(col_template="{col_name}", row_template="{row_name}")
+    for idx, (use, panel) in enumerate(combos):
+        row = idx // n_cols
+        col = idx % n_cols
+        ax = axes[row, col]
+        subset = tidy[(tidy["use_label"] == use) & (tidy["panel"] == panel)]
+        if subset.empty:
+            ax.axis("off")
+            continue
 
-    for axes_row in g.axes:
-        for ax in axes_row:
-            if ax is None:
-                continue
-            ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.7)
-            if reference is not None:
-                ax.axhline(reference, color="#2c3e50", linestyle=":", linewidth=1)
-
-    if g._legend is not None:
-        legend = g._legend
-        legend.set_title("")
-        labels = [text.get_text() for text in legend.texts]
-        legend.remove()
-
-        axes = [ax for ax in g.axes.flat if ax is not None]
-        handle_lookup: Dict[str, object] = {}
-        for ax in axes:
-            axis_handles, axis_labels = ax.get_legend_handles_labels()
-            for handle, label in zip(axis_handles, axis_labels):
-                if label and label not in handle_lookup:
-                    handle_lookup[label] = handle
-
-        handles = [handle_lookup[label] for label in labels if label in handle_lookup]
-        if not handles:
-            handles = [h for h in handle_lookup.values()]
-            labels = [l for l in handle_lookup.keys()]
-
-        ncol = max(1, min(len(labels), 4))
-        g.fig.legend(
-            handles,
-            labels,
-            loc="upper center",
-            bbox_to_anchor=(0.5, 1.05),
-            ncol=ncol,
-            frameon=False,
+        sns.lineplot(
+            data=subset,
+            x="delta",
+            y="value",
+            hue="variant",
+            hue_order=variant_order,
+            palette=variant_palette,
+            style="b_label",
+            style_order=style_order,
+            markers=marker_map,
+            dashes=False,
+            errorbar="sd",
+            ax=ax,
+            linewidth=1.8,
+            markersize=5.5,
         )
 
-    g.fig.subplots_adjust(top=0.92, hspace=0.25)
-    g.fig.suptitle(spec.title, fontsize=13)
+        if col == 0:
+            ax.set_ylabel(spec.ylabel)
+        else:
+            ax.set_ylabel("")
+
+        if row == n_rows - 1:
+            ax.set_xlabel("Mixture separation δ")
+        else:
+            ax.set_xlabel("")
+
+        ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.7)
+        if reference is not None:
+            ax.axhline(reference, color="#2c3e50", linestyle=":", linewidth=1.1)
+
+        if ax.legend_ is not None:
+            ax.legend_.remove()
+
+        ax.set_title(f"{panel}\n{use}", fontsize=9)
+
+    for idx in range(n_panels, n_rows * n_cols):
+        row = idx // n_cols
+        col = idx % n_cols
+        axes[row, col].axis("off")
+
+    legend_handles: List[Line2D] = []
+    legend_labels: List[str] = []
+
+    for variant in variant_order:
+        handle = Line2D([0, 1], [0, 0], color=variant_palette[variant], linewidth=2.6)
+        legend_handles.append(handle)
+        legend_labels.append(f"{variant} (line color)")
+
+    for label in style_order:
+        handle = Line2D(
+            [0],
+            [0],
+            marker=marker_map[label],
+            color="#3c3c3c",
+            linestyle="",
+            markersize=7,
+            markerfacecolor="#3c3c3c",
+        )
+        legend_handles.append(handle)
+        legend_labels.append(f"{label} (marker)")
+
+    if reference is not None:
+        legend_handles.append(
+            Line2D([0, 1], [0, 0], color="#2c3e50", linestyle=":", linewidth=1.3)
+        )
+        legend_labels.append(f"Target coverage = {reference:.2f}")
+
+    ncol = min(4, max(1, len(legend_handles)))
+
+    fig.subplots_adjust(left=0.08, right=0.98, top=0.82, bottom=0.12, hspace=0.5, wspace=0.24)
+
+    fig.legend(
+        legend_handles,
+        legend_labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.92),
+        ncol=ncol,
+        frameon=False,
+        fontsize=9,
+    )
+
+    fig.suptitle(spec.title, fontsize=13, y=0.985)
+    fig.text(
+        0.5,
+        0.955,
+        "Line color identifies predictor; marker denotes ||b||; shaded band is ±1 SD across seeds.",
+        ha="center",
+        va="center",
+        fontsize=9,
+    )
 
     ensure_dir(out_dir)
-    g.fig.savefig(Path(out_dir) / spec.filename, dpi=300)
-    plt.close(g.fig)
+    fig.savefig(Path(out_dir) / spec.filename, dpi=300, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _plot_imputation_metrics(df: pd.DataFrame, out_dir: Path) -> None:
     specs = [
         MetricSpec("mean_max_tau", "Mean max responsibility", "mean_max_tau_vs_delta.png", "Mean max responsibility vs separation", scalar_label=IMPUTATION_LABELS["mean_max_tau"]),
-        MetricSpec("cross_entropy", "Cross-entropy", "cross_entropy_vs_delta.png", "Cross-entropy vs separation", scalar_label=IMPUTATION_LABELS["cross_entropy"]),
         MetricSpec("z_feature_mse", "Z-feature MSE", "z_feature_mse_vs_delta.png", "Z-feature MSE vs separation", scalar_label=IMPUTATION_LABELS["z_feature_mse"]),
     ]
 
@@ -198,6 +283,49 @@ def _plot_scatter_relationships(df: pd.DataFrame, out_dir: Path) -> None:
     plt.close(fig)
 
 
+def _plot_len_gap_heatmap(df: pd.DataFrame, out_dir: Path) -> None:
+    grouped = list(df.groupby("use_x_in_em"))
+    if not grouped:
+        return
+
+    agg = df.groupby(["use_x_in_em", "delta", "rho"])["len_gap_soft"].mean()
+    max_abs = float(agg.abs().max()) if not agg.empty else 0.0
+    vmax = max(max_abs, 1e-6)
+
+    n_cols = len(grouped)
+    fig, axes = plt.subplots(1, n_cols, figsize=(4.2 * n_cols, 3.6), squeeze=False)
+    axes = axes[0]
+
+    for idx, (use, group) in enumerate(grouped):
+        pivot = (
+            group.groupby(["delta", "rho"])["len_gap_soft"].mean()
+            .sort_index()
+            .unstack("rho")
+            .sort_index(axis=1)
+        )
+        sns.heatmap(
+            pivot,
+            annot=True,
+            fmt=".2f",
+            cmap="coolwarm",
+            center=0.0,
+            vmin=-vmax,
+            vmax=vmax,
+            cbar=idx == n_cols - 1,
+            cbar_kws={"label": "Mean soft length gap"},
+            ax=axes[idx],
+        )
+        axes[idx].set_title(f"Soft length gap\n{USE_LABEL[use]}")
+        axes[idx].set_xlabel("ρ")
+        axes[idx].set_ylabel("δ")
+
+    fig.suptitle("Soft length gap vs separation (δ) and correlation (ρ)", fontsize=13, y=0.98)
+    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    ensure_dir(out_dir)
+    fig.savefig(Path(out_dir) / "len_gap_heatmap.png", dpi=300)
+    plt.close(fig)
+
+
 def _plot_em_diagnostics(df: pd.DataFrame, out_dir: Path) -> None:
     fig, ax = plt.subplots(figsize=(6, 4))
     sns.histplot(df["em_iter"], bins=20, kde=False, ax=ax, color="#4c72b0")
@@ -215,12 +343,12 @@ def generate_all_plots(results_csv: str | Path, out_dir: str | Path, alpha: floa
     results_path = Path(results_csv)
     output_dir = Path(out_dir)
     df = pd.read_csv(results_path)
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
     if df.empty:
         raise ValueError("Results CSV is empty; nothing to plot")
 
     metric_specs = [
         MetricSpec("coverage_", "Coverage", "coverage_vs_delta.png", "Coverage vs separation", label_map=VARIANT_LABELS),
-        MetricSpec("length_", "Interval length", "length_vs_delta.png", "Interval length vs separation", label_map=VARIANT_LABELS),
         MetricSpec("len_gap_", "Length gap vs oracle", "length_gap_vs_delta.png", "Length gap vs separation", label_map=VARIANT_LABELS),
     ]
 
@@ -232,4 +360,5 @@ def generate_all_plots(results_csv: str | Path, out_dir: str | Path, alpha: floa
 
     _plot_imputation_metrics(df, output_dir)
     _plot_scatter_relationships(df, output_dir)
+    _plot_len_gap_heatmap(df, output_dir)
     _plot_em_diagnostics(df, output_dir)
