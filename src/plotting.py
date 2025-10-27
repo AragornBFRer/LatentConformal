@@ -318,7 +318,7 @@ def _plot_imputation_metrics(df: pd.DataFrame, out_dir: Path) -> None:
             "mean_max_tau_vs_grid.png",
             "Mean max responsibility across grid",
             scalar_label=IMPUTATION_LABELS["mean_max_tau"],
-            x_candidates=["b_scale", "sigma_y", "delta"],
+            x_candidates=["delta", "sigma_y", "b_scale"],
         ),
         MetricSpec(
             "z_feature_mse",
@@ -326,7 +326,7 @@ def _plot_imputation_metrics(df: pd.DataFrame, out_dir: Path) -> None:
             "z_feature_mse_vs_grid.png",
             "Z-feature MSE across grid",
             scalar_label=IMPUTATION_LABELS["z_feature_mse"],
-            x_candidates=["b_scale", "sigma_y", "delta"],
+            x_candidates=["delta", "sigma_y", "b_scale"],
         ),
     ]
 
@@ -405,7 +405,7 @@ def generate_all_plots(results_csv: str | Path, out_dir: str | Path, alpha: floa
             "coverage_vs_grid.png",
             "Coverage across parameter grid",
             label_map=VARIANT_LABELS,
-            x_candidates=["b_scale", "sigma_y", "delta"],
+            x_candidates=["delta", "sigma_y", "b_scale"],
         ),
         MetricSpec(
             "len_ratio_",
@@ -413,7 +413,7 @@ def generate_all_plots(results_csv: str | Path, out_dir: str | Path, alpha: floa
             "length_ratio_vs_grid.png",
             "Length ratio across parameter grid",
             label_map=VARIANT_LABELS,
-            x_candidates=["b_scale", "sigma_y", "delta"],
+            x_candidates=["delta", "sigma_y", "b_scale"],
         ),
     ]
 
