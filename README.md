@@ -8,7 +8,7 @@ chmod +x run.sh
 ./run.sh
 
 # running 100 trials
-bash run.sh experiments/configs/gmm_em.yaml 100 experiments/plots_test experiments/results/gmm_em_results_test.csv
+bash run.sh experiments/configs/gmm_em.yaml 100 experiments/plots experiments/results/gmm_em_results.csv
 
 # Windows PowerShell
 python main.py --config experiments/configs/gmm_em.yaml
