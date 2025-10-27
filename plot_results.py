@@ -6,6 +6,8 @@ from pathlib import Path
 from src.config import load_config
 from src.plotting import generate_all_plots
 
+import warnings
+warnings.filterwarnings("ignore")
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate plots for latent conformal experiments")
