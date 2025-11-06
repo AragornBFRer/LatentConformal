@@ -4,7 +4,6 @@ archive/
 *.ipynb
 .vscode/
 .DS_Store
-AGENTS.md
 archive*/
 history/
 
