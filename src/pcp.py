@@ -31,7 +31,7 @@ class ConstantProbabilityEstimator:
 class PCPConfig:
     n_thresholds: int = 9
     logistic_cv_folds: int = 5
-    max_clusters: int = 6
+    max_clusters: int = 15
     cluster_r2_tol: float = 0.05
     factor_max_iter: int = 400
     factor_tol: float = 1e-4
