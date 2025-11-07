@@ -112,3 +112,40 @@ class EMSoftPredictor(Predictor):
         z_feature = _ensure_2d(z_feat)
         base = self.params.intercept + X @ self.params.theta if X.size else np.full(z_feature.shape[0], self.params.intercept)
         return base + (z_feature @ self.params.b)
+
+
+class XRZYPredictor(Predictor):
+    def __init__(self, ridge_alpha: float = 0.0) -> None:
+        self.ridge_alpha = ridge_alpha
+        self.coef: np.ndarray | None = None
+
+    def fit(self, X: np.ndarray, Y: np.ndarray, *, R: np.ndarray, **kwargs) -> "XRZYPredictor":
+        X_arr = np.asarray(X, dtype=float)
+        R_arr = np.asarray(R, dtype=float)
+        if X_arr.ndim == 1:
+            X_arr = X_arr.reshape(-1, 1)
+        if R_arr.ndim == 1:
+            R_arr = R_arr.reshape(-1, 1)
+        if X_arr.shape[0] != R_arr.shape[0]:
+            raise ValueError("X and R must have matching sample counts")
+        design = _augment(np.hstack([X_arr, R_arr]))
+        self.coef = _solve_linear(design, Y, self.ridge_alpha)
+        self._d_x = X_arr.shape[1]
+        self._d_r = R_arr.shape[1]
+        return self
+
+    def predict_mean(self, X: np.ndarray, *, R: np.ndarray, **kwargs) -> np.ndarray:
+        if self.coef is None:
+            raise RuntimeError("Model not fitted")
+        X_arr = np.asarray(X, dtype=float)
+        R_arr = np.asarray(R, dtype=float)
+        if X_arr.ndim == 1:
+            X_arr = X_arr.reshape(-1, 1)
+        if R_arr.ndim == 1:
+            R_arr = R_arr.reshape(-1, 1)
+        if X_arr.shape[0] != R_arr.shape[0]:
+            raise ValueError("X and R must have matching sample counts")
+        if X_arr.shape[1] != getattr(self, "_d_x", X_arr.shape[1]) or R_arr.shape[1] != getattr(self, "_d_r", R_arr.shape[1]):
+            raise ValueError("Input feature dimensions differ from those seen during fitting")
+        design = _augment(np.hstack([X_arr, R_arr]))
+        return design @ self.coef

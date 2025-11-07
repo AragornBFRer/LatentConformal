@@ -14,8 +14,9 @@ from .conformal import split_conformal
 from .data_gen import DatasetSplit, generate_data
 from .em_gmm import fit_gmm_em, gmm_responsibilities
 from .metrics import avg_length, coverage, cross_entropy, mean_max_tau, z_feature_mse
-from .predictors import EMSoftPredictor, IgnoreZPredictor, OracleZPredictor
+from .predictors import EMSoftPredictor, IgnoreZPredictor, OracleZPredictor, XRZYPredictor
 from .utils import ensure_dir, rng_from_seed
+from .pcp import PCPConfig, train_pcp
 
 try:
     from tqdm.auto import tqdm
@@ -107,6 +108,19 @@ def _run_single(cfg: ExperimentConfig, run_cfg: RunConfig) -> Dict[str, float]:
         "ignore": ignore.predict_mean(test.X),
     }
 
+    xrzy = XRZYPredictor(ridge_alpha=cfg.model_cfg.ridge_alpha_xrzy).fit(train.X, train.Y, R=train.R)
+    mu_cal_pcp = xrzy.predict_mean(cal.X, R=cal.R)
+    mu_test_pcp = xrzy.predict_mean(test.X, R=test.R)
+    scores_pcp = np.abs(cal.Y - mu_cal_pcp)
+    pcp_model = train_pcp(
+        cal.R,
+        scores_pcp,
+        alpha=cfg.global_cfg.alpha,
+        rng=rng,
+        config=PCPConfig(),
+    )
+    qhat_pcp = pcp_model.quantiles(test.R, rng)
+
     results = {}
     for name in preds_test:
         q = qhat[name]
@@ -118,6 +132,14 @@ def _run_single(cfg: ExperimentConfig, run_cfg: RunConfig) -> Dict[str, float]:
     denom = length_oracle if length_oracle != 0 else 1e-12
     results["len_ratio_soft"] = results["length_soft"] / denom
     results["len_ratio_ignore"] = results["length_ignore"] / denom
+
+    results["coverage_pcp"] = coverage(test.Y, mu_test_pcp, qhat_pcp)
+    results["length_pcp"] = avg_length(qhat_pcp)
+    results["len_ratio_pcp"] = results["length_pcp"] / denom
+    results["pcp_frac_inf"] = float(np.mean(~np.isfinite(qhat_pcp)))
+    results["pcp_precision"] = float(pcp_model.precision)
+    results["pcp_clusters"] = float(pcp_model.n_clusters)
+    results["pcp_cluster_r2"] = float(pcp_model.cluster_r2)
 
     results["mean_max_tau"] = mean_max_tau(tau_test)
     results["cross_entropy"] = cross_entropy(tau_test, test.Z)

@@ -49,6 +49,7 @@ class ModelConfig:
     ridge_alpha_oracle: float
     ridge_alpha_soft: float
     ridge_alpha_ignore: float
+    ridge_alpha_xrzy: float
 
 
 @dataclass(frozen=True)
@@ -173,6 +174,12 @@ def load_config(path: str | Path) -> ExperimentConfig:
         ridge_alpha_oracle=float(m_raw.get("ridge_alpha_oracle", 0.0)),
         ridge_alpha_soft=float(m_raw.get("ridge_alpha_soft", m_raw.get("ridge_alpha", 0.0))),
         ridge_alpha_ignore=float(m_raw.get("ridge_alpha_ignore", 0.0)),
+        ridge_alpha_xrzy=float(
+            m_raw.get(
+                "ridge_alpha_xrzy",
+                m_raw.get("ridge_alpha_ignore", m_raw.get("ridge_alpha", 0.0)),
+            )
+        ),
     )
 
     io_cfg = IOConfig(

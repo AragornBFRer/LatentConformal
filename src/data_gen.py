@@ -55,11 +55,13 @@ def generate_data(
     d_x = dgp_cfg.d_X
     total = n_train + n_cal + n_test
 
+    # delta scales the simplex of latent means in the R-space
     means_r = simplex_vertices(K, d_r, run_cfg.delta, allow_smaller_dim=True)
 
     use_full_S = dgp_cfg.use_S.upper() == "RX"
     means_x = np.zeros((K, d_x))
     if dgp_cfg.mu_x_shift != 0.0 and d_x > 0:
+        # optional X-mean shift also scales with delta
         shift = dgp_cfg.mu_x_shift * run_cfg.delta
         base = np.zeros((K, d_x))
         base[:, 0] = np.linspace(-(K - 1) / 2.0, (K - 1) / 2.0, K)
