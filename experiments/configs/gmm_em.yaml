@@ -36,3 +36,13 @@ model:
 io:
   results_csv: "experiments/results/gmm_em_results.csv"
   artifacts_dir: "experiments/artifacts"
+
+pcp:
+  xrzy:
+    enabled: true
+  base:
+    enabled: true
+  em:
+    enabled: true
+    membership_smoothing: 0.3
+    precision_grid: [1, 2, 5, 10, 20]
