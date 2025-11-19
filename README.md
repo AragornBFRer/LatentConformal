@@ -72,6 +72,20 @@ Other key YAML knobs:
 - `em_fit`: how to fit responsibilities (`use_X_in_em`, covariance model, iterations).
 - `model`: ridge penalties for oracle/soft/ignore/XRZY regressors.
 
+Included predictors / objects in this repo:
+
+| Name | What it means / uses |
+| --- | --- |
+| **Oracle-Z** | Linear regressor trained with the true latent centroids `μ_Z`. Serves as the unattainable lower bound for interval length. |
+| **EM-soft** | Same architecture as Oracle but replaces `μ_Z` with responsibility-weighted estimates from the EM fit (R-only or [R;X], depending on `use_X_in_em`). |
+| **Ignore-Z** | Baseline that regresses `Y` on `X` only, ignoring any latent structure; mirrors standard split conformal. |
+| **XRZY PCP** | Posterior-conformal method that clusters calibration residual CDFs as a function of `R` only (responsibilities from the `XRZYPredictor`). |
+| **PCP-base** | Residual-driven PCP that uses both `X` and `R` features to fit the conditional residual CDF grid, then factorizes templates to produce adaptive weights. |
+| **EM-PCP** | PCP variant that first fits a joint Gaussian mixture over `(R, X, Y)` to get memberships `π_k(x,r,y)` and then reweights calibration residuals with the `MembershipPCPModel`. |
+| **EM-R / EM-RX** | Two responsibility pipelines. EM-R feeds only `R` into the GMM, EM-RX stacks `(R, X)`; both are configured by `em_fit.use_X_in_em`. |
+| **XRZYPredictor** | Ridge regressor for `μ(X, R)` used inside XRZY PCP and as the base mean for PCP-base / EM-PCP intervals. |
+| **MembershipPCPModel** | Lightweight adapter that consumes membership matrices (e.g., from EM-PCP) and performs the multinomial precision sampling + weighted quantile selection. |
+
 Run a subset of baselines by pairing CLI overrides with YAML edits. Example: EM-PCP only.
 
 ```bash
