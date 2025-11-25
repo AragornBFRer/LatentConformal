@@ -10,7 +10,7 @@ dgp:
   d_R: 1
   d_X: 3
   use_S: "R"
-  delta_list: [0.0]
+  delta_list: [0.5, 0.75, 1.0, 1.5, 2.0]
   sigma_s: 1.0
   cov_type_true: "diag"
   rho_list: [0.0]

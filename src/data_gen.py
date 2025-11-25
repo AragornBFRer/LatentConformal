@@ -41,11 +41,13 @@ def generate_data(
     d_x = int(dgp_cfg.d_X)
     total = n_train + n_cal + n_test
 
-    alpha, sigma, mu_r = _cluster_params(dgp_cfg, K)
+    alpha_base, sigma, mu_r = _cluster_params(dgp_cfg, K)
     eta = np.asarray(dgp_cfg.eta, dtype=float)
     if eta.size != d_x:
         raise ValueError(f"eta vector has length {eta.size}, expected {d_x}")
     eta0 = float(dgp_cfg.eta0)
+    delta = float(run_cfg.delta)
+    alpha = alpha_base * delta
 
     pi = np.full(K, 1.0 / K)
     z = rng.choice(K, size=total, p=pi)
@@ -81,6 +83,8 @@ def generate_data(
         "sigma": sigma,
         "eta0": eta0,
         "eta": eta,
+        "alpha_base": alpha_base,
+        "delta": delta,
     }
 
     return train, cal, test, info
