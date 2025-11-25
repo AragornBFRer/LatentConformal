@@ -1,3 +1,4 @@
+### No longer used ###
 """Expectation-maximisation for Gaussian mixture models."""
 from __future__ import annotations
 
