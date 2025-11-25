@@ -30,6 +30,11 @@ class DGPConfig:
     sigma_y_list: List[float]
     b_scale_list: List[float]
     mu_x_shift: float
+    alpha: List[float]
+    sigma: List[float]
+    mu_r: List[List[float]]
+    eta0: float
+    eta: List[float]
 
 
 @dataclass(frozen=True)
@@ -156,6 +161,63 @@ def _parse_precision_grid(raw_grid, default: Tuple[int, ...]) -> Tuple[int, ...]
     return tuple([int(raw_grid)])
 
 
+def _parse_cluster_scalar_list(
+    raw_values,
+    target_len: int,
+    label: str,
+    default_factory,
+) -> List[float]:
+    if target_len <= 0:
+        return []
+    if raw_values is None:
+        return [float(default_factory(idx)) for idx in range(target_len)]
+    seq = list(raw_values)
+    if len(seq) < target_len:
+        raise ValueError(f"'{label}' requires at least {target_len} entries, got {len(seq)}")
+    return [float(seq[idx]) for idx in range(target_len)]
+
+
+def _parse_cluster_vector_list(
+    raw_values,
+    target_len: int,
+    dim: int,
+    label: str,
+    default_factory,
+) -> List[List[float]]:
+    if target_len <= 0:
+        return []
+    if raw_values is None:
+        return [list(default_factory(idx)) for idx in range(target_len)]
+    seq = list(raw_values)
+    if len(seq) < target_len:
+        raise ValueError(f"'{label}' requires at least {target_len} rows, got {len(seq)}")
+    result: List[List[float]] = []
+    for idx in range(target_len):
+        entry = seq[idx]
+        if isinstance(entry, (list, tuple)):
+            row = [float(v) for v in entry]
+        else:
+            row = [float(entry)]
+        if len(row) == 1 and dim > 1:
+            row = row + [0.0] * (dim - 1)
+        if len(row) != dim:
+            raise ValueError(
+                f"Each row in '{label}' must have {dim} values; row {idx} has {len(row)}"
+            )
+        result.append(row)
+    return result
+
+
+def _parse_eta_vector(raw_values, dim: int, default: Iterable[float]) -> List[float]:
+    seq = list(default) if raw_values is None else list(raw_values)
+    if len(seq) < dim:
+        if raw_values is None:
+            seq = seq + [0.0] * (dim - len(seq))
+        else:
+            raise ValueError(f"'eta' requires at least {dim} entries, got {len(seq)}")
+    return [float(seq[idx]) for idx in range(dim)]
+
+
 def _parse_optional_int(value) -> Optional[int]:
     if value is None:
         return None
@@ -217,10 +279,54 @@ def load_config(path: str | Path) -> ExperimentConfig:
     if b_scale_source is None:
         b_scale_source = d_raw.get("beta_spread_list", [1.0])
 
+    K_list = _expand_range(d_raw.get("K_list", [2]))
+    if not K_list:
+        raise ValueError("dgp.K_list must contain at least one value")
+    d_R = int(d_raw.get("d_R", 4))
+    d_X = int(d_raw.get("d_X", 6))
+    max_K = max(int(k) for k in K_list)
+
+    alpha_vals = _parse_cluster_scalar_list(
+        d_raw.get("alpha"),
+        max_K,
+        "alpha",
+        lambda idx: idx + 1,
+    )
+    sigma_vals = _parse_cluster_scalar_list(
+        d_raw.get("sigma"),
+        max_K,
+        "sigma",
+        lambda idx: 2 ** idx,
+    )
+
+    def _default_mu_r(idx: int) -> List[float]:
+        row = [0.0] * d_R
+        if d_R > 0:
+            if max_K <= 1:
+                center = 0.0
+            else:
+                start = -3.0
+                end = 3.0
+                step = (end - start) / (max_K - 1)
+                center = start + step * idx
+            row[0] = center
+        return row
+
+    mu_r_vals = _parse_cluster_vector_list(
+        d_raw.get("mu_r"),
+        max_K,
+        d_R,
+        "mu_r",
+        _default_mu_r,
+    )
+
+    eta_vals = _parse_eta_vector(d_raw.get("eta"), d_X, [1.0, -0.5, 0.8])
+    eta0_val = float(d_raw.get("eta0", 0.5))
+
     dgp_cfg = DGPConfig(
-        K_list=_expand_range(d_raw.get("K_list", [2])),
-        d_R=int(d_raw.get("d_R", 4)),
-        d_X=int(d_raw.get("d_X", 6)),
+        K_list=K_list,
+        d_R=d_R,
+        d_X=d_X,
         use_S=str(d_raw.get("use_S", "R")),
         delta_list=_expand_range(d_raw.get("delta_list", [1.0])),
         sigma_s=float(d_raw.get("sigma_s", 1.0)),
@@ -229,6 +335,11 @@ def load_config(path: str | Path) -> ExperimentConfig:
         sigma_y_list=_expand_range(sigma_y_source),
         b_scale_list=_expand_range(b_scale_source),
         mu_x_shift=float(d_raw.get("mu_x_shift", 0.0)),
+        alpha=alpha_vals,
+        sigma=sigma_vals,
+        mu_r=mu_r_vals,
+        eta0=eta0_val,
+        eta=eta_vals,
     )
 
     em_cfg = EMConfig(

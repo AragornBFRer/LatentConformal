@@ -1,4 +1,4 @@
-"""Synthetic data generation for latent-cluster experiments."""
+"""Synthetic data generation aligned with the documented XRZY model."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,7 +7,6 @@ from typing import Dict, Tuple
 import numpy as np
 
 from .config import DGPConfig, RunConfig
-from .utils import simplex_vertices
 
 
 @dataclass
@@ -18,28 +17,15 @@ class DatasetSplit:
     Z: np.ndarray
 
 
-def _make_covariance(dgp: DGPConfig, rho: float, use_full_S: bool) -> np.ndarray:
-    d_r = dgp.d_R
-    d_x = dgp.d_X
-    sigma2 = dgp.sigma_s ** 2
-    if use_full_S:
-        cov_rr = sigma2 * np.eye(d_r)
-        cov_xx = sigma2 * np.eye(d_x)
-        if dgp.cov_type_true == "full" and rho != 0.0:
-            cov_rx = rho * sigma2 * np.eye(d_r, d_x)
-        else:
-            cov_rx = np.zeros((d_r, d_x))
-        top = np.hstack([cov_rr, cov_rx])
-        bottom = np.hstack([cov_rx.T, cov_xx])
-        cov = np.vstack([top, bottom])
-        if dgp.cov_type_true == "diag":
-            cov = np.diag(np.diag(cov))
-    else:
-        cov = sigma2 * np.eye(d_r)
-        if dgp.cov_type_true == "diag":
-            cov = np.diag(np.diag(cov))
-    cov += 1e-9 * np.eye(cov.shape[0])
-    return cov
+def _cluster_params(dgp_cfg: DGPConfig, K: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    alpha = np.asarray(dgp_cfg.alpha[:K], dtype=float)
+    sigma = np.asarray(dgp_cfg.sigma[:K], dtype=float)
+    mu_r = np.asarray(dgp_cfg.mu_r[:K], dtype=float)
+    if mu_r.ndim == 1:
+        mu_r = mu_r.reshape(-1, 1)
+    if alpha.size != K or sigma.size != K or mu_r.shape[0] != K:
+        raise ValueError("Cluster parameter lists must provide at least K entries")
+    return alpha, sigma, mu_r
 
 
 def generate_data(
@@ -50,76 +36,35 @@ def generate_data(
     n_test: int,
     rng: np.random.Generator,
 ) -> Tuple[DatasetSplit, DatasetSplit, DatasetSplit, Dict[str, np.ndarray]]:
-    K = run_cfg.K
-    d_r = dgp_cfg.d_R
-    d_x = dgp_cfg.d_X
+    K = int(run_cfg.K)
+    d_r = int(dgp_cfg.d_R)
+    d_x = int(dgp_cfg.d_X)
     total = n_train + n_cal + n_test
 
-    # delta scales the simplex of latent means in the R-space
-    means_r = simplex_vertices(K, d_r, run_cfg.delta, allow_smaller_dim=True)
-
-    use_full_S = dgp_cfg.use_S.upper() == "RX"
-    means_x = np.zeros((K, d_x))
-    if dgp_cfg.mu_x_shift != 0.0 and d_x > 0:
-        # optional X-mean shift also scales with delta
-        shift = dgp_cfg.mu_x_shift * run_cfg.delta
-        base = np.zeros((K, d_x))
-        base[:, 0] = np.linspace(-(K - 1) / 2.0, (K - 1) / 2.0, K)
-        base -= base.mean(axis=0, keepdims=True)
-        means_x = shift * base
-    if use_full_S:
-        means_full = np.zeros((K, d_r + d_x))
-        means_full[:, :d_r] = means_r
-        means_full[:, d_r:] = means_x
-    else:
-        means_full = None
+    alpha, sigma, mu_r = _cluster_params(dgp_cfg, K)
+    eta = np.asarray(dgp_cfg.eta, dtype=float)
+    if eta.size != d_x:
+        raise ValueError(f"eta vector has length {eta.size}, expected {d_x}")
+    eta0 = float(dgp_cfg.eta0)
 
     pi = np.full(K, 1.0 / K)
     z = rng.choice(K, size=total, p=pi)
 
-    R = np.empty((total, d_r))
-    X = np.empty((total, d_x))
-
-    if use_full_S:
-        cov = _make_covariance(dgp_cfg, run_cfg.rho, True)
-        for k in range(K):
-            mask = z == k
-            n_k = int(mask.sum())
-            if n_k == 0:
-                continue
-            R_and_X = rng.multivariate_normal(mean=means_full[k], cov=cov, size=n_k)
-            R[mask] = R_and_X[:, :d_r]
-            X[mask] = R_and_X[:, d_r:]
-    else:
-        cov_r = _make_covariance(dgp_cfg, run_cfg.rho, False)
-        for k in range(K):
-            mask = z == k
-            n_k = int(mask.sum())
-            if n_k == 0:
-                continue
-            R[mask] = rng.multivariate_normal(mean=means_r[k], cov=cov_r, size=n_k)
-        # X independent standard normal
-        X[:] = rng.normal(size=(total, d_x))
-
-    theta = rng.normal(scale=1.0 / max(1, np.sqrt(d_x)), size=d_x)
+    X = rng.normal(loc=0.0, scale=1.0, size=(total, d_x)) if d_x > 0 else np.zeros((total, 0))
+    R = np.zeros((total, d_r)) if d_r > 0 else np.zeros((total, 0))
     if d_r > 0:
-        b = rng.normal(scale=1.0 / max(1, np.sqrt(d_r)), size=d_r)
-        norm_b = np.linalg.norm(b)
-        if run_cfg.b_scale <= 0.0:
-            b = np.zeros_like(b)
-        elif norm_b > 0:
-            b = (run_cfg.b_scale / norm_b) * b
-        else:
-            b = np.zeros_like(b)
-        mu_r_lookup = means_r
-        cluster_contrib = mu_r_lookup[z] @ b
-    else:
-        b = np.zeros(0, dtype=float)
-        cluster_contrib = np.zeros(total)
+        for k in range(K):
+            mask = z == k
+            n_k = int(mask.sum())
+            if n_k == 0:
+                continue
+            center = mu_r[k]
+            R[mask] = rng.normal(loc=center, scale=1.0, size=(n_k, d_r))
 
-    noise = rng.normal(scale=run_cfg.sigma_y, size=total)
-    linear = X @ theta if d_x > 0 else np.zeros(total)
-    Y = linear + cluster_contrib + noise
+    linear = (X @ eta) if d_x > 0 else np.zeros(total)
+    alpha_shift = alpha[z]
+    noise = rng.normal(loc=0.0, scale=sigma[z], size=total)
+    Y = eta0 + linear + alpha_shift + noise
 
     train_slice = slice(0, n_train)
     cal_slice = slice(n_train, n_train + n_cal)
@@ -131,14 +76,11 @@ def generate_data(
 
     info = {
         "pi": pi,
-        "means_r": means_r,
-        "means_x": means_x,
-        "theta": theta,
-        "b": b,
-        "sigma_y": run_cfg.sigma_y,
-        "rho": run_cfg.rho,
+        "means_r": mu_r,
+        "alpha": alpha,
+        "sigma": sigma,
+        "eta0": eta0,
+        "eta": eta,
     }
-    if means_full is not None:
-        info["means_full"] = means_full
 
     return train, cal, test, info

@@ -6,32 +6,41 @@ global:
   alpha: 0.1
 
 dgp:
-  K_list: [10] # [2, 3]
-  d_R: 10
-  d_X: 5
-  use_S: "RX"
-  delta_list: [1, 3, 5, 10, 20, 30]  # [0.4, 0.8, 1.2], [1, 3, 5, 10, 20, 30], [0.1, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0] 
+  K_list: [4]
+  d_R: 1
+  d_X: 3
+  use_S: "R"
+  delta_list: [0.0]
   sigma_s: 1.0
-  cov_type_true: "full"
-  rho_list: [0.0]  # [0.0, 0.3, 0.6]
-  sigma_y_list: [1.0, 2.0, 3.0]  # [0.5, 1.0, 1.5], [1.0, 5.0, 10.0]
-  b_scale_list: [1.0]  # [0.4, 1.0, 1.6]
+  cov_type_true: "diag"
+  rho_list: [0.0]
+  sigma_y_list: [0.0]
+  b_scale_list: [0.0]
   mu_x_shift: 0.0
+  alpha: [1.0, 2.0, 3.0, 4.0]
+  sigma: [1.0, 2.0, 4.0, 8.0]
+  mu_r: [-3.0, -1.0, 1.0, 3.0]
+  eta0: 0.5
+  eta: [1.0, -0.5, 0.8]
 
 em_fit:
   K_fit: null
   cov_type_fit: "full"
   reg_covar: 1e-6
-  max_iter: 200
-  tol: 1e-5
+  max_iter: 400
+  tol: 1e-6
   init: "kmeans"
-  n_init: 5
-  use_X_in_em: [false, true]
+  n_init: 1
+  use_X_in_em: [false]
 
 model:
   ridge_alpha_oracle: 0.0
   ridge_alpha_soft: 0.0
   ridge_alpha_ignore: 0.0
+  pcp_rf_n_estimators: 300
+  pcp_rf_max_depth: null
+  pcp_rf_min_samples_leaf: 5
+  pcp_rf_n_jobs: -1
 
 io:
   results_csv: "experiments/results/gmm_em_results.csv"

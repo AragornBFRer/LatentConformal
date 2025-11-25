@@ -12,7 +12,7 @@ import pandas as pd
 from .config import ExperimentConfig, PCPVariantOptions, RunConfig, iter_run_configs, load_config
 from .conformal import split_conformal
 from .data_gen import DatasetSplit, generate_data
-from .em_gmm import fit_gmm_em, gmm_responsibilities
+from .doc_em import fit_doc_em, responsibilities_from_r, responsibilities_with_y
 from .metrics import avg_length, coverage, cross_entropy, mean_max_tau, z_feature_mse
 from .predictors import EMSoftPredictor, IgnoreZPredictor, OracleZPredictor, XRZYPredictor
 from .utils import ensure_dir, rng_from_seed
@@ -32,12 +32,6 @@ def _combo_seed(run_cfg: RunConfig) -> int:
     ).encode()
     digest = hashlib.sha256(payload).digest()
     return int.from_bytes(digest[:8], "little", signed=False)
-
-
-def _build_em_features(split: DatasetSplit, use_x: bool) -> np.ndarray:
-    if use_x:
-        return np.hstack([split.R, split.X])
-    return split.R
 
 
 def _variant_to_pcp_config(variant: PCPVariantOptions) -> PCPConfig:
@@ -78,28 +72,6 @@ def _concat_features(X: np.ndarray, R: np.ndarray) -> np.ndarray:
     return parts[0] if len(parts) == 1 else np.hstack(parts)
 
 
-def _stack_rxy(R: np.ndarray, X: np.ndarray, Y: np.ndarray) -> np.ndarray:
-    R_arr = np.asarray(R, dtype=float)
-    X_arr = np.asarray(X, dtype=float)
-    Y_arr = np.asarray(Y, dtype=float)
-    if R_arr.ndim == 1:
-        R_arr = R_arr.reshape(-1, 1)
-    if X_arr.ndim == 1:
-        X_arr = X_arr.reshape(-1, 1)
-    Y_arr = Y_arr.reshape(-1, 1)
-    parts = []
-    if R_arr.size:
-        parts.append(R_arr)
-    if X_arr.size:
-        parts.append(X_arr)
-    parts.append(Y_arr)
-    base_n = parts[0].shape[0]
-    for part in parts[1:]:
-        if part.shape[0] != base_n:
-            raise ValueError("R, X, and Y must share the same number of samples")
-    return parts[0] if len(parts) == 1 else np.hstack(parts)
-
-
 def _smooth_memberships(pi: np.ndarray, smoothing: float) -> np.ndarray:
     arr = np.asarray(pi, dtype=float)
     if arr.ndim != 2:
@@ -126,38 +98,31 @@ def _run_single(cfg: ExperimentConfig, run_cfg: RunConfig) -> Dict[str, float]:
         rng,
     )
 
-    K_fit = cfg.em_cfg.K_fit or run_cfg.K
-    S_train = _build_em_features(train, run_cfg.use_x_in_em)
-    S_cal = _build_em_features(cal, run_cfg.use_x_in_em)
-    S_test = _build_em_features(test, run_cfg.use_x_in_em)
+    alpha = np.asarray(true_params["alpha"], dtype=float)
+    sigma = np.asarray(true_params["sigma"], dtype=float)
+    pi_prior = np.asarray(true_params["pi"], dtype=float)
 
-    em_params = fit_gmm_em(
-        S_train,
-        K_fit,
-        cov_type=cfg.em_cfg.cov_type_fit,
+    em_params, tau_train = fit_doc_em(
+        train.X,
+        train.R,
+        train.Y,
+        alpha=alpha,
+        sigma=sigma,
+        pi=pi_prior,
         max_iter=cfg.em_cfg.max_iter,
         tol=cfg.em_cfg.tol,
-        reg_covar=cfg.em_cfg.reg_covar,
-        init=cfg.em_cfg.init,
-        n_init=cfg.em_cfg.n_init,
-        r_dim=cfg.dgp_cfg.d_R,
         rng=rng,
     )
 
-    tau_train = gmm_responsibilities(S_train, em_params)
-    tau_cal = gmm_responsibilities(S_cal, em_params)
-    tau_test = gmm_responsibilities(S_test, em_params)
+    tau_cal = responsibilities_with_y(cal.X, cal.R, cal.Y, em_params)
+    tau_test = responsibilities_from_r(test.R, em_params)
 
     means_r_true = true_params["means_r"]
     z_star_train = means_r_true[train.Z]
     z_star_cal = means_r_true[cal.Z]
     z_star_test = means_r_true[test.Z]
 
-    em_means = em_params.means
-    if run_cfg.use_x_in_em:
-        mu_hat_r = em_means[:, : cfg.dgp_cfg.d_R]
-    else:
-        mu_hat_r = em_means
+    mu_hat_r = em_params.mu_r
     z_soft_train = tau_train @ mu_hat_r
     z_soft_cal = tau_cal @ mu_hat_r
     z_soft_test = tau_test @ mu_hat_r
@@ -260,7 +225,7 @@ def _run_single(cfg: ExperimentConfig, run_cfg: RunConfig) -> Dict[str, float]:
         results["pcp_base_clusters"] = float(pcp_base_model.n_clusters)
         results["pcp_base_cluster_r2"] = float(pcp_base_model.cluster_r2)
 
-    # EM-PCP using joint GMM over (R, X, Y)
+    # EM-PCP using memberships from the doc-style EM fit
     results["coverage_em_pcp"] = np.nan
     results["length_em_pcp"] = np.nan
     results["len_ratio_em_pcp"] = np.nan
@@ -269,23 +234,8 @@ def _run_single(cfg: ExperimentConfig, run_cfg: RunConfig) -> Dict[str, float]:
     results["em_pcp_clusters"] = np.nan
     results["em_pcp_cluster_r2"] = np.nan
     if cfg.pcp_cfg.em.enabled:
-        joint_train = _stack_rxy(train.R, train.X, train.Y)
-        joint_params = fit_gmm_em(
-            joint_train,
-            cfg.em_cfg.K_fit or run_cfg.K,
-            cov_type=cfg.em_cfg.cov_type_fit,
-            max_iter=cfg.em_cfg.max_iter,
-            tol=cfg.em_cfg.tol,
-            reg_covar=cfg.em_cfg.reg_covar,
-            init=cfg.em_cfg.init,
-            n_init=cfg.em_cfg.n_init,
-            r_dim=cfg.dgp_cfg.d_R + cfg.dgp_cfg.d_X,
-            rng=rng,
-        )
-        joint_cal = _stack_rxy(cal.R, cal.X, cal.Y)
-        pi_cal_em = gmm_responsibilities(joint_cal, joint_params)
-        joint_test = _stack_rxy(test.R, test.X, mu_test_pcp)
-        pi_test_em = gmm_responsibilities(joint_test, joint_params)
+        pi_cal_em = tau_cal.copy()
+        pi_test_em = tau_test.copy()
         smoothing = getattr(cfg.pcp_cfg.em, "membership_smoothing", 0.0)
         if smoothing > 0.0:
             pi_cal_em = _smooth_memberships(pi_cal_em, smoothing)

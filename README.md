@@ -2,6 +2,36 @@ Default configs live in `experiments/configs/gmm_em.yaml`.
 
 ---
 
+## XRZY simulation recap
+
+The simulator now mirrors the specification in `sim_model-dgp.md`:
+
+- **Latent clusters:** `K = 4` with uniform prior.
+- **Observed covariates:** `X ∈ ℝ³` sampled i.i.d. from `𝒩(0, I₃)`.
+- **Auxiliary feature:** `R | Z = k ∼ 𝒩(μ_{R,k}, 1)` with `μ_R = (-3, -1, 1, 3)`.
+- **Outcome:** `Y = η₀ + ηᵀ X + α_Z + ε_Z`, where `η₀ = 0.5`, `η = (1, -0.5, 0.8)`,
+	`α = (1, 2, 3, 4)`, and `ε_Z ∼ 𝒩(0, σ_Z²)` with `σ = (1, 2, 4, 8)`.
+- No leakage: `R` only informs `Y` through the latent cluster.
+
+Those constants can be overridden through the `dgp` block in the YAML (see
+`alpha`, `sigma`, `mu_r`, `eta0`, `eta`).
+
+### EM routine
+
+`src/doc_em.py` implements the EM algorithm described in `sim_algo.md`:
+
+- E-step scores jointly log-likelihoods for `(R, Y)` given cluster `k`.
+- M-step performs the weighted least squares update for `(η₀, η)` and updates
+	`μ_{R,k}` via responsibility-weighted means.
+- Responsibilities on calibration data use the observed `(R, Y)`, whereas test
+	memberships fall back to the R-only formula `π_k(R) ∝ π_k 𝒩(R | μ_{R,k}, 1)`.
+- EM-PCP reuses these memberships instead of fitting a separate joint GMM.
+
+The soft predictor and diagnostics (`mean_max_tau`, `z_feature_mse`) now rely on
+these doc-style responsibilities.
+
+---
+
 ## 1. Run the XRZY baselines
 
 ### One-click runner (Linux/macOS)
@@ -85,6 +115,13 @@ Included predictors / objects in this repo:
 | **EM-R / EM-RX** | Two responsibility pipelines. EM-R feeds only `R` into the GMM, EM-RX stacks `(R, X)`; both are configured by `em_fit.use_X_in_em`. |
 | **XRZYPredictor** | Ridge regressor for `μ(X, R)` used inside XRZY PCP and as the base mean for PCP-base / EM-PCP intervals. |
 | **MembershipPCPModel** | Lightweight adapter that consumes membership matrices (e.g., from EM-PCP) and performs the multinomial precision sampling + weighted quantile selection. |
+
+**Doc-style updates:**
+
+- The XRZY predictor backing PCP now defaults to a `RandomForestRegressor`
+	(`model.pcp_rf_*` knobs) to avoid oracle leakage.
+- EM-soft features, EM diagnostics, and EM-PCP all draw memberships from
+	`src/doc_em.py`, ensuring consistency with the simulator assumptions.
 
 Run a subset of baselines by pairing CLI overrides with YAML edits. Example: EM-PCP only.
 
