@@ -34,7 +34,7 @@ these doc-style responsibilities.
 
 ---
 
-## 1. Run the XRZY baselines
+## 1. Run the remaining baselines
 
 ### One-click runner (Linux/macOS)
 
@@ -70,8 +70,6 @@ The YAML file now contains a `pcp` section controlling each posterior-conformal 
 
 ```yaml
 pcp:
-	xrzy:
-		enabled: true   # responsibilities based on R only (current default)
 	base:
 		enabled: true   # residual-driven PCP on (X,R)
 	em:
@@ -102,27 +100,22 @@ Other key YAML knobs:
 - `global`: seeds, split sizes, target `alpha`.
 - `dgp`: latent structure (`K_list`, `delta_list`, `rho_list`, `sigma_y_list`, `b_scale_list`).
 - `em_fit`: how to fit responsibilities (`use_X_in_em`, covariance model, iterations).
-- `model`: ridge penalties for oracle/soft/ignore/XRZY regressors.
+- `model`: ridge penalty for the linear regressors (shared by ignore and joint predictors).
 
 Included predictors / objects in this repo:
 
 | Name | What it means / uses |
 | --- | --- |
-| **Oracle-Z** | Fits `μ_oracle(x,z*) = θ₀ + θᵀ x + bᵀ z*` using the true latent centroids `z* = μ_R[Z]`, then forms `C_oracle(x,z*) = { y : |y - μ_oracle(x,z*)| ≤ q_oracle }`; acts as the unattainable gold standard. |
-| **EM-soft** | Replaces `z*` with softened features `z_soft(x,r) = τ(x,r) μ̂_R` from the EM fit, yielding `μ_soft = θ₀ + θᵀ x + bᵀ z_soft` and intervals `C_soft(x,r) = { y : |y - μ_soft(x,r)| ≤ q_soft }`. |
 | **Ignore-Z** | Models `μ_ignore(x) = θ₀ + θᵀ x` only, so its split-conformal band is `C_ignore(x) = { y : |y - μ_ignore(x)| ≤ q_ignore }`; no latent information enters. |
-| **XRZY PCP** | Learns a base mean `μ_XRZY(x,r)` with the random-forest XRZYPredictor, then conditions posterior-conformal quantiles on `R` only, giving `C_PCP(x,r) = { y : |y - μ_XRZY(x,r)| ≤ q_PCP(r) }`. |
-| **PCP-base** | Starts from the same residuals as XRZY PCP but conditions on the concatenated block `[x; r]`, producing radii `q_base(x,r)` and sets `C_base(x,r) = { y : |y - μ_XRZY(x,r)| ≤ q_base(x,r) }`. |
-| **EM-PCP** | Uses doc-EM memberships `π(x,r,y)` to weight calibration residuals via `MembershipPCPModel`, yielding `q_em(π)` and cluster-aware bands `C_em(x,r) = { y : |y - μ_XRZY(x,r)| ≤ q_em(π(x,r,y)) }`. |
-| **EM-R / EM-RX** | Responsibility pipelines feeding the soft/EM-PCP features: EM-R fits the GMM on `R` alone (features `τ_R(r)`), while EM-RX fits on `[R; X]` (`τ_RX(x,r)`), toggled by `em_fit.use_X_in_em`. |
-| **XRZYPredictor** | The random-forest mean estimator `μ_XRZY(x,r)` that seeds PCP residuals and serves as the plug-in conditional expectation when latent structure is approximated via `(X,R)`. |
-| **MembershipPCPModel** | Consumes membership weights `π` (from EM-PCP or other sources) and outputs quantiles `q(π)` by multinomial-precision weighting, enabling set construction `C(π) = { y : |y - μ_XRZY| ≤ q(π) }`. |
+| **PCP-base** | Fits a joint linear predictor `μ_joint(x,r) = θ₀ + θᵀ [x; r]`, uses residuals `|y - μ_joint(x,r)|`, and conditions posterior conformal quantiles on the same `[x; r]` block, yielding `C_base(x,r) = { y : |y - μ_joint(x,r)| ≤ q_base(x,r) }`. |
+| **EM-PCP** | Uses doc-EM memberships `π(x,r,y)` to weight the joint residuals via `MembershipPCPModel`, giving `C_em(x,r) = { y : |y - μ_joint(x,r)| ≤ q_em(π(x,r,y)) }`. |
+| **EM-R / EM-RX** | Responsibility pipelines feeding EM-PCP: EM-R fits the GMM on `R` alone (features `τ_R(r)`), while EM-RX fits on `[R; X]` (`τ_RX(x,r)`), toggled by `em_fit.use_X_in_em`. |
+| **MembershipPCPModel** | Consumes membership weights `π` and outputs quantiles `q(π)` by multinomial-precision weighting, enabling set construction `C(π) = { y : |y - μ_joint| ≤ q(π) }`. |
 
 **Doc-style updates:**
 
-- The XRZY predictor backing PCP now defaults to a `RandomForestRegressor`
-	(`model.pcp_rf_*` knobs) to avoid oracle leakage.
-- EM-soft features, EM diagnostics, and EM-PCP all draw memberships from
+- Joint residuals for PCP now come from a single linear model on `[X; R]`, avoiding dependencies on oracle-style regressors.
+- EM diagnostics and EM-PCP continue to draw memberships from
 	`src/doc_em.py`, ensuring consistency with the simulator assumptions.
 
 Run a subset of baselines by pairing CLI overrides with YAML edits. Example: EM-PCP only.
@@ -131,7 +124,7 @@ Run a subset of baselines by pairing CLI overrides with YAML edits. Example: EM-
 python main.py --config experiments/configs/gmm_em.yaml --results experiments/results/em_pcp_only.csv
 ```
 
-With `pcp.xrzy.enabled=false`, `pcp.base.enabled=false`, `pcp.em.enabled=true` inside the YAML.
+With `pcp.base.enabled=false`, `pcp.em.enabled=true` inside the YAML.
 
 ---
 
@@ -148,9 +141,8 @@ The plotter automatically discovers all columns in the CSV. When PCP-base or EM-
 | Plot | Description |
 | --- | --- |
 | `coverage_vs_grid.png` | Coverage for every baseline vs. the sweep variable (δ by default). The dotted line is the target coverage `1 - α`. |
-| `length_ratio_vs_grid.png` | Interval length divided by the oracle’s length; smaller is better. Helpful for spotting which conformal baseline is most efficient. |
-| `length_ratio_vs_grid_pcp.png` | PCP-only comparison (EM-PCP vs. PCP-base) restricted to EM-R runs so you can see their gap without extra panels. |
-| `len_ratio_diagnostics.png` | Scatter diagnostics showing how soft conformal length ratios correlate with EM quality metrics (mean max τ and Z-feature MSE). |
+| `length_vs_grid.png` | Absolute interval length for each baseline; lower is better. |
+| `length_vs_grid_pcp.png` | PCP-only comparison (EM-PCP vs. PCP-base) restricted to EM-R runs so you can see their gap without extra panels. |
 | `mean_max_tau_vs_grid.png` | Average sharpness of EM responsibilities. High values mean clusters are well separated. |
 | `z_feature_mse_vs_grid.png` | MSE between the EM-soft features and the oracle latent means. Lower values indicate better feature recovery. |
 | `em_iterations_hist.png` | Histogram of EM iteration counts, useful for spotting difficult configurations. |
