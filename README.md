@@ -6,11 +6,13 @@ Default configs live in `experiments/configs/gmm_em.yaml`.
 
 The simulator now mirrors the specification in `sim_model-dgp.md`:
 
-- **Latent clusters:** `K = 4` with uniform prior.
-- **Observed covariates:** `X ∈ ℝ³` sampled i.i.d. from `𝒩(0, I₃)`.
 - **Auxiliary feature:** `R | Z = k ∼ 𝒩(μ_{R,k}, 1)` with `μ_R = (-3, -1, 1, 3)`.
-- **Outcome:** `Y = η₀ + ηᵀ X + α_Z + ε_Z`, where `η₀ = 0.5`, `η = (1, -0.5, 0.8)`,
 	`α = (1, 2, 3, 4)`, and `ε_Z ∼ 𝒩(0, σ_Z²)` with `σ = (1, 2, 4, 8)`.
+	**Outcome:** `Y = η₀ + ηᵀ X + α_Z + ε_Z`, where `η₀ = 0.5`, `η = (1, -0.5, 0.8)`,
+	`α = (1, 2, 3, 4)`, and `ε_Z ∼ 𝒩(0, σ_Z²)` with `σ = (1, 2, 4, 8)`.
+	The actual shift used in any run is `α̃_k = δ · α_k` where `δ ∈ dgp.delta_list`
+	(default: five values `[0.5, 0.75, 1.0, 1.5, 2.0]`). This “mixture separation”
+	knob lets you sweep how distinct the clusters are without redefining `α`.
 - No leakage: `R` only informs `Y` through the latent cluster.
 
 Those constants can be overridden through the `dgp` block in the YAML (see
@@ -106,15 +108,15 @@ Included predictors / objects in this repo:
 
 | Name | What it means / uses |
 | --- | --- |
-| **Oracle-Z** | Linear regressor trained with the true latent centroids `μ_Z`. Serves as the unattainable lower bound for interval length. |
-| **EM-soft** | Same architecture as Oracle but replaces `μ_Z` with responsibility-weighted estimates from the EM fit (R-only or [R;X], depending on `use_X_in_em`). |
-| **Ignore-Z** | Baseline that regresses `Y` on `X` only, ignoring any latent structure; mirrors standard split conformal. |
-| **XRZY PCP** | Posterior-conformal method that clusters calibration residual CDFs as a function of `R` only (responsibilities from the `XRZYPredictor`). |
-| **PCP-base** | Residual-driven PCP that uses both `X` and `R` features to fit the conditional residual CDF grid, then factorizes templates to produce adaptive weights. |
-| **EM-PCP** | PCP variant that first fits a joint Gaussian mixture over `(R, X, Y)` to get memberships `π_k(x,r,y)` and then reweights calibration residuals with the `MembershipPCPModel`. |
-| **EM-R / EM-RX** | Two responsibility pipelines. EM-R feeds only `R` into the GMM, EM-RX stacks `(R, X)`; both are configured by `em_fit.use_X_in_em`. |
-| **XRZYPredictor** | Ridge regressor for `μ(X, R)` used inside XRZY PCP and as the base mean for PCP-base / EM-PCP intervals. |
-| **MembershipPCPModel** | Lightweight adapter that consumes membership matrices (e.g., from EM-PCP) and performs the multinomial precision sampling + weighted quantile selection. |
+| **Oracle-Z** | Fits `μ_oracle(x,z*) = θ₀ + θᵀ x + bᵀ z*` using the true latent centroids `z* = μ_R[Z]`, then forms `C_oracle(x,z*) = { y : |y - μ_oracle(x,z*)| ≤ q_oracle }`; acts as the unattainable gold standard. |
+| **EM-soft** | Replaces `z*` with softened features `z_soft(x,r) = τ(x,r) μ̂_R` from the EM fit, yielding `μ_soft = θ₀ + θᵀ x + bᵀ z_soft` and intervals `C_soft(x,r) = { y : |y - μ_soft(x,r)| ≤ q_soft }`. |
+| **Ignore-Z** | Models `μ_ignore(x) = θ₀ + θᵀ x` only, so its split-conformal band is `C_ignore(x) = { y : |y - μ_ignore(x)| ≤ q_ignore }`; no latent information enters. |
+| **XRZY PCP** | Learns a base mean `μ_XRZY(x,r)` with the random-forest XRZYPredictor, then conditions posterior-conformal quantiles on `R` only, giving `C_PCP(x,r) = { y : |y - μ_XRZY(x,r)| ≤ q_PCP(r) }`. |
+| **PCP-base** | Starts from the same residuals as XRZY PCP but conditions on the concatenated block `[x; r]`, producing radii `q_base(x,r)` and sets `C_base(x,r) = { y : |y - μ_XRZY(x,r)| ≤ q_base(x,r) }`. |
+| **EM-PCP** | Uses doc-EM memberships `π(x,r,y)` to weight calibration residuals via `MembershipPCPModel`, yielding `q_em(π)` and cluster-aware bands `C_em(x,r) = { y : |y - μ_XRZY(x,r)| ≤ q_em(π(x,r,y)) }`. |
+| **EM-R / EM-RX** | Responsibility pipelines feeding the soft/EM-PCP features: EM-R fits the GMM on `R` alone (features `τ_R(r)`), while EM-RX fits on `[R; X]` (`τ_RX(x,r)`), toggled by `em_fit.use_X_in_em`. |
+| **XRZYPredictor** | The random-forest mean estimator `μ_XRZY(x,r)` that seeds PCP residuals and serves as the plug-in conditional expectation when latent structure is approximated via `(X,R)`. |
+| **MembershipPCPModel** | Consumes membership weights `π` (from EM-PCP or other sources) and outputs quantiles `q(π)` by multinomial-precision weighting, enabling set construction `C(π) = { y : |y - μ_XRZY| ≤ q(π) }`. |
 
 **Doc-style updates:**
 
