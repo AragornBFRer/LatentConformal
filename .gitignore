@@ -6,5 +6,6 @@ archive/
 .DS_Store
 archive*/
 history/
+*legacy*/
 
 *quick_start*.md
