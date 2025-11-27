@@ -35,6 +35,32 @@ class RandomForestParams:
     random_state: int | None = None
 
 
+class RandomForestMeanPredictor(Predictor):
+    def __init__(self, params: RandomForestParams) -> None:
+        self.params = params
+        self._model: RandomForestRegressor | None = None
+
+    def _build_model(self) -> RandomForestRegressor:
+        return RandomForestRegressor(
+            n_estimators=self.params.n_estimators,
+            max_depth=self.params.max_depth,
+            min_samples_leaf=self.params.min_samples_leaf,
+            n_jobs=self.params.n_jobs,
+            random_state=self.params.random_state,
+        )
+
+    def fit(self, X: np.ndarray, Y: np.ndarray, **kwargs) -> "RandomForestMeanPredictor":
+        model = self._build_model()
+        model.fit(_ensure_2d(X), np.asarray(Y, dtype=float))
+        self._model = model
+        return self
+
+    def predict_mean(self, X: np.ndarray, **kwargs) -> np.ndarray:
+        if self._model is None:
+            raise RuntimeError("Model not fitted")
+        return self._model.predict(_ensure_2d(X))
+
+
 class RandomForestQuantilePredictor(Predictor):
     def __init__(self, params: RandomForestParams) -> None:
         self.params = params

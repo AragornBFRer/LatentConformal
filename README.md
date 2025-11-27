@@ -106,15 +106,20 @@ Included predictors / objects in this repo:
 
 | Name | What it means / uses |
 | --- | --- |
-| **CQR-ignoreZ** | Fits a RandomForest on `[X; R]` as a quantile regressor, then applies conformalized quantile regression (CQR) so the calibrated band is `C_cqr(x,r) = [\hat{q}_{α/2}(x,r) - \,\hat{s}, \hat{q}_{1-α/2}(x,r) + \,\hat{s}]`. |
-| **PCP-base** | Uses a RandomForest mean predictor on `[X; R]` to produce residuals `|y - μ_rf(x,r)|`, then feeds those residuals into PCP to obtain adaptive radii `q_base(x,r)` for the same feature block. |
-| **EM-PCP** | Uses doc-EM memberships `π(x,r,y)` to weight the joint residuals via `MembershipPCPModel`, giving `C_em(x,r) = { y : |y - μ_joint(x,r)| ≤ q_em(π(x,r,y)) }`. |
+| **CQR-ignoreZ** | RandomForest quantile regressor on `[X; R]` with conformalized quantile regression calibration. Still available, but mainly serves as an external reference. |
+| **PCP (X,R)** | RandomForest mean model on `[X; R]` produces residuals `|y - μ_rf(x,r)|` that drive the PCP clustering/reweighting pipeline. |
+| **PCP (X,Z)** | Oracle PCP that augments the regressors and clustering features with the true latent one-hot `Z`. Helpful for gauging the ceiling when the latent label is known. |
+| **PCP (X,ẑ)** | Uses doc-EM responsibilities `ẑ = π(x,r,y)` (soft memberships) instead of the oracle `Z`, measuring how much benefit calibrated memberships alone provide. |
+| **PCP (X,R,ẑ)** | Blends observed `R` with the soft memberships `ẑ`, letting PCP cluster on both auxiliary signals simultaneously. |
+| **EM-PCP** | The membership-aware conformal predictor that weights residuals by `π(x,r,y)` via `MembershipPCPModel`, producing sets `C_em(x,r) = { y : |y - μ_joint(x,r)| ≤ q_em(π(x,r,y)) }`. |
 | **EM-R / EM-RX** | Responsibility pipelines feeding EM-PCP: EM-R fits the GMM on `R` alone (features `τ_R(r)`), while EM-RX fits on `[R; X]` (`τ_RX(x,r)`), toggled by `em_fit.use_X_in_em`. |
 | **MembershipPCPModel** | Consumes membership weights `π` and outputs quantiles `q(π)` by multinomial-precision weighting, enabling set construction `C(π) = { y : |y - μ_joint| ≤ q(π) }`. |
 
+Here `ẑ` always refers to the doc-EM responsibilities returned by `responsibilities_with_y` / `responsibilities_from_r`.
+
 **Doc-style updates:**
 
-- Both CQR-ignoreZ and PCP-base now share a RandomForest backbone on `[X; R]`, removing the need for oracle-style linear regressors.
+- All PCP baselines now ride the same RandomForest regression backbone, but they differ only in which covariates they expose to PCP (oracle `Z`, soft `ẑ`, or auxiliary `R`).
 - EM diagnostics and EM-PCP continue to draw memberships from
 	`src/doc_em.py`, ensuring consistency with the simulator assumptions.
 
@@ -142,7 +147,7 @@ The plotter automatically discovers all columns in the CSV. When PCP-base or EM-
 | --- | --- |
 | `coverage_vs_grid.png` | Coverage for every baseline vs. the sweep variable (δ by default). The dotted line is the target coverage `1 - α`. |
 | `length_vs_grid.png` | Absolute interval length for each baseline; lower is better. |
-| `length_vs_grid_pcp.png` | PCP-only comparison (EM-PCP vs. PCP-base) restricted to EM-R runs so you can see their gap without extra panels. |
+| `length_vs_grid_pcp.png` | PCP-only comparison (EM-PCP vs. all PCP baselines) restricted to EM-R runs so you can focus on how each feature choice impacts set length. |
 | `mean_max_tau_vs_grid.png` | Average sharpness of EM responsibilities. High values mean clusters are well separated. |
 | `z_feature_mse_vs_grid.png` | MSE between the EM-soft features and the oracle latent means. Lower values indicate better feature recovery. |
 | `em_iterations_hist.png` | Histogram of EM iteration counts, useful for spotting difficult configurations. |

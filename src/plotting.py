@@ -24,11 +24,19 @@ USE_ROW_LABEL = {
 }
 VARIANT_LABELS = {
     "cqr_ignore": "CQR-ignoreZ",
-    "pcp_base": "PCP-base",
+    "pcp_xr": "PCP (X,R)",
+    "pcp_xz": "PCP (X,Z)",
+    "pcp_xzhat": "PCP (X,ẑ)",
+    "pcp_xrzhat": "PCP (X,R,ẑ)",
+    "pcp_base": "PCP (X,R)",  # legacy column support
     "em_pcp": "EM-PCP",
 }
 VARIANT_COLORS = {
     "cqr_ignore": "#1f77b4",
+    "pcp_xr": "#ff7f0e",
+    "pcp_xz": "#9467bd",
+    "pcp_xzhat": "#8c564b",
+    "pcp_xrzhat": "#e377c2",
     "pcp_base": "#ff7f0e",
     "em_pcp": "#2ca02c",
 }
@@ -294,9 +302,15 @@ def generate_all_plots(results_csv: str | Path, out_dir: str | Path, alpha: floa
             "Interval length",
             "length_vs_grid_pcp.png",
             "PCP baseline interval length across parameter grid",
-            label_map={"pcp_base": "PCP-base", "em_pcp": "EM-PCP"},
+            label_map={
+                "pcp_xr": "PCP (X,R)",
+                "pcp_xz": "PCP (X,Z)",
+                "pcp_xzhat": "PCP (X,ẑ)",
+                "pcp_xrzhat": "PCP (X,R,ẑ)",
+                "em_pcp": "EM-PCP",
+            },
             x_candidates=["delta"],
-            variant_filter=["pcp_base", "em_pcp"],
+            variant_filter=["pcp_xr", "pcp_xz", "pcp_xzhat", "pcp_xrzhat", "em_pcp"],
         ),
     ]
 

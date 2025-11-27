@@ -20,7 +20,11 @@ from .conformal import split_conformal
 from .data_gen import DatasetSplit, generate_data
 from .doc_em import fit_doc_em, responsibilities_from_r, responsibilities_with_y
 from .metrics import avg_length, coverage, cross_entropy, mean_max_tau, z_feature_mse
-from .predictors import RandomForestParams, RandomForestQuantilePredictor
+from .predictors import (
+    RandomForestMeanPredictor,
+    RandomForestParams,
+    RandomForestQuantilePredictor,
+)
 from .utils import ensure_dir, rng_from_seed
 from .pcp import PCPConfig, train_pcp
 from .pcp_membership import MembershipPCPModel
@@ -29,6 +33,14 @@ try:
     from tqdm.auto import tqdm
 except ImportError:  # pragma: no cover - tqdm may be unavailable at runtime
     tqdm = None
+
+
+PCP_INPUT_SPECS = {
+    "pcp_xr": ("X", "R"),
+    "pcp_xz": ("X", "Z"),
+    "pcp_xzhat": ("X", "Zhat"),
+    "pcp_xrzhat": ("X", "R", "Zhat"),
+}
 
 
 def _combo_seed(run_cfg: RunConfig) -> int:
@@ -64,6 +76,41 @@ def _sample_rf_params(model_cfg, rng: np.random.Generator) -> RandomForestParams
         n_jobs=model_cfg.rf_n_jobs,
         random_state=int(rng.integers(0, 2**31 - 1)),
     )
+
+
+def _ensure_feature_array(arr: np.ndarray) -> np.ndarray:
+    block = np.asarray(arr, dtype=float)
+    if block.ndim == 1:
+        block = block.reshape(-1, 1)
+    return block
+
+
+def _stack_feature_components(
+    split: DatasetSplit,
+    components: tuple[str, ...],
+    *,
+    K: int,
+    tau_split: np.ndarray | None = None,
+) -> np.ndarray:
+    parts: List[np.ndarray] = []
+    for comp in components:
+        if comp == "X":
+            block = _ensure_feature_array(split.X)
+        elif comp == "R":
+            block = _ensure_feature_array(split.R)
+        elif comp == "Z":
+            block = np.eye(K)[np.asarray(split.Z, dtype=int)]
+        elif comp == "Zhat":
+            if tau_split is None:
+                raise ValueError("Zhat features require membership probabilities for the split")
+            block = _ensure_feature_array(tau_split)
+        else:
+            raise ValueError(f"Unknown feature component '{comp}'")
+        if block.size:
+            parts.append(block)
+    if not parts:
+        raise ValueError("At least one non-empty component is required for PCP features")
+    return np.hstack(parts)
 
 
 def _concat_features(X: np.ndarray, R: np.ndarray) -> np.ndarray:
@@ -129,6 +176,7 @@ def _run_single(cfg: ExperimentConfig, run_cfg: RunConfig) -> Dict[str, float]:
         rng=rng,
     )
 
+    tau_train = responsibilities_with_y(train.X, train.R, train.Y, em_params)
     tau_cal = responsibilities_with_y(cal.X, cal.R, cal.Y, em_params)
     tau_test = responsibilities_from_r(test.R, em_params)
 
@@ -140,6 +188,22 @@ def _run_single(cfg: ExperimentConfig, run_cfg: RunConfig) -> Dict[str, float]:
     features_train = _concat_features(train.X, train.R)
     features_cal = _concat_features(cal.X, cal.R)
     features_test = _concat_features(test.X, test.R)
+
+    splits = {"train": train, "cal": cal, "test": test}
+    taus = {"train": tau_train, "cal": tau_cal, "test": tau_test}
+    pcp_feature_bundles: Dict[str, Dict[str, np.ndarray]] = {}
+    for name, components in PCP_INPUT_SPECS.items():
+        needs_hat = "Zhat" in components
+        bundle: Dict[str, np.ndarray] = {}
+        for split_name, split_data in splits.items():
+            tau_split = taus[split_name] if needs_hat else None
+            bundle[split_name] = _stack_feature_components(
+                split_data,
+                components,
+                K=run_cfg.K,
+                tau_split=tau_split,
+            )
+        pcp_feature_bundles[name] = bundle
 
     # CQR-ignoreZ interval via RandomForest quantile regression
     alpha_lo = 0.5 * cfg.global_cfg.alpha
@@ -164,28 +228,38 @@ def _run_single(cfg: ExperimentConfig, run_cfg: RunConfig) -> Dict[str, float]:
     results["coverage_cqr_ignore"] = coverage(test.Y, center_cqr, radius_cqr)
     results["length_cqr_ignore"] = avg_length(radius_cqr)
 
-    # PCP-base using (X, R) features
-    results["coverage_pcp_base"] = np.nan
-    results["length_pcp_base"] = np.nan
-    results["pcp_base_frac_inf"] = np.nan
-    results["pcp_base_precision"] = np.nan
-    results["pcp_base_clusters"] = np.nan
-    results["pcp_base_cluster_r2"] = np.nan
+    pcp_variant_names = list(PCP_INPUT_SPECS.keys())
+    for name in pcp_variant_names:
+        results[f"coverage_{name}"] = np.nan
+        results[f"length_{name}"] = np.nan
+        results[f"{name}_frac_inf"] = np.nan
+        results[f"{name}_precision"] = np.nan
+        results[f"{name}_clusters"] = np.nan
+        results[f"{name}_cluster_r2"] = np.nan
+
     if cfg.pcp_cfg.base.enabled:
-        pcp_base_model = train_pcp(
-            features_cal,
-            scores_joint,
-            alpha=cfg.global_cfg.alpha,
-            rng=rng,
-            config=_variant_to_pcp_config(cfg.pcp_cfg.base),
-        )
-        qhat_pcp_base = pcp_base_model.quantiles(features_test, rng)
-        results["coverage_pcp_base"] = coverage(test.Y, mu_test_joint, qhat_pcp_base)
-        results["length_pcp_base"] = avg_length(qhat_pcp_base)
-        results["pcp_base_frac_inf"] = float(np.mean(~np.isfinite(qhat_pcp_base)))
-        results["pcp_base_precision"] = float(pcp_base_model.precision)
-        results["pcp_base_clusters"] = float(pcp_base_model.n_clusters)
-        results["pcp_base_cluster_r2"] = float(pcp_base_model.cluster_r2)
+        pcp_config = _variant_to_pcp_config(cfg.pcp_cfg.base)
+        for name in pcp_variant_names:
+            bundle = pcp_feature_bundles[name]
+            rf_params = _sample_rf_params(cfg.model_cfg, rng)
+            predictor = RandomForestMeanPredictor(rf_params).fit(bundle["train"], train.Y)
+            mu_cal = predictor.predict_mean(bundle["cal"])
+            mu_test_variant = predictor.predict_mean(bundle["test"])
+            scores_variant = np.abs(cal.Y - mu_cal)
+            pcp_model = train_pcp(
+                bundle["cal"],
+                scores_variant,
+                alpha=cfg.global_cfg.alpha,
+                rng=rng,
+                config=pcp_config,
+            )
+            qhat = pcp_model.quantiles(bundle["test"], rng)
+            results[f"coverage_{name}"] = coverage(test.Y, mu_test_variant, qhat)
+            results[f"length_{name}"] = avg_length(qhat)
+            results[f"{name}_frac_inf"] = float(np.mean(~np.isfinite(qhat)))
+            results[f"{name}_precision"] = float(pcp_model.precision)
+            results[f"{name}_clusters"] = float(pcp_model.n_clusters)
+            results[f"{name}_cluster_r2"] = float(pcp_model.cluster_r2)
 
     # EM-PCP using memberships from the doc-style EM fit
     results["coverage_em_pcp"] = np.nan
