@@ -62,6 +62,31 @@ Arguments mirror the CLI in `main.py`:
 - `--trials`: overrides the set of seeds defined in the YAML (`1..trials`).
 - `--results`: optional destination CSV (defaults to `io.results_csv`).
 
+### Sequential execution: multi-config launcher
+
+Sweep several YAML configs without manually juggling output folders. Use `multi_main.py`:
+
+```bash
+python multi_main.py \
+		--run experiment_1=experiments/configs/sample_gmm_em_1.yaml \
+		--run experiment_2=experiments/configs/sample_gmm_em_2.yaml \
+		--trials 10 \
+		--results-root experiments/results \
+		--plots-root experiments/plots
+```
+
+Key facts:
+
+- Each `--run` flag takes `<identifier>=<config-path>`. Identifiers determine the
+	subfolders (e.g., `experiments/results/experiment_1/results.csv`).
+- `--trials` works like the single-config CLI: it replaces the YAML seeds with
+	`range(1, trials+1)` for every run.
+- Use `--skip-plots` if you only need the CSVs; otherwise the launcher calls
+	`generate_all_plots` for each identifier and saves them under
+	`plots-root/<identifier>/`.
+- Outputs are naturally segmented, so you can start the same command on multiple
+	machines or schedule different identifiers independently without overwriting
+	one another.
 ---
 
 ## 2. Choose which baselines to compare
