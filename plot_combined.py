@@ -26,6 +26,11 @@ import warnings
 warnings.filterwarnings("ignore")
 
 sns.set_theme(style="whitegrid")
+sns.set_context("talk")
+
+LABEL_FONTSIZE = 16
+TICK_FONTSIZE = 13
+LEGEND_FONTSIZE = 13
 
 PCP_VARIANTS = ["pcp_xr", "pcp_xz", "pcp_xzhat", "pcp_xrzhat", "em_pcp"]
 
@@ -72,6 +77,12 @@ def _prepare_metric(
     axis_field = _choose_axis_field(tidy, spec.x_candidates)
     axis_label = AXIS_LABELS.get(axis_field, axis_field.replace("_", " ").title())
     return tidy, axis_field, axis_label
+
+
+def _style_tick_labels(ax: plt.Axes) -> None:
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        label.set_fontsize(TICK_FONTSIZE)
+        label.set_fontweight("bold")
 
 
 def _collect_series_info(tidies: Iterable[pd.DataFrame]) -> Tuple[List[str], Dict[str, str]]:
@@ -146,8 +157,9 @@ def _plot_metric_axis(
         ax=ax,
     )
 
-    ax.set_xlabel(axis_label)
-    ax.set_ylabel(y_label)
+    ax.set_xlabel(axis_label, fontsize=LABEL_FONTSIZE, fontweight="bold")
+    ax.set_ylabel(y_label, fontsize=LABEL_FONTSIZE, fontweight="bold")
+    _style_tick_labels(ax)
     ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.7)
 
     if reference is not None:
@@ -187,14 +199,18 @@ def _create_shared_legend(fig: plt.Figure, axes: List[plt.Axes]) -> None:
         return
 
     handles_clean, labels_clean = zip(*unique_entries)
-    fig.legend(
+    legend = fig.legend(
         handles_clean,
         labels_clean,
         loc="upper center",
         bbox_to_anchor=(0.5, 0.985),
         ncol=len(labels_clean),
         frameon=False,
+        fontsize=LEGEND_FONTSIZE,
     )
+    if legend is not None:
+        for text in legend.get_texts():
+            text.set_fontweight("bold")
 
 
 def plot_combined_metrics(

@@ -15,6 +15,12 @@ from matplotlib.lines import Line2D
 from .utils import ensure_dir
 
 sns.set_theme(style="whitegrid")
+sns.set_context("talk")
+
+LABEL_FONTSIZE = 16
+TICK_FONTSIZE = 13
+LEGEND_FONTSIZE = 13
+TITLE_FONTSIZE = 18
 
 ID_COLS = ["seed", "K", "delta", "rho", "sigma_y", "b_scale", "use_x_in_em"]
 USE_LABEL = {False: "EM-R", True: "EM-RX"}
@@ -169,6 +175,12 @@ def _format_series_label(row: pd.Series, fields: List[str]) -> str:
     return " · ".join(parts)
 
 
+def _style_tick_labels(ax: plt.Axes) -> None:
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        label.set_fontsize(TICK_FONTSIZE)
+        label.set_fontweight("bold")
+
+
 def _plot_metric_single(
     tidy: pd.DataFrame,
     spec: MetricSpec,
@@ -219,14 +231,28 @@ def _plot_metric_single(
         ax=ax,
     )
 
-    ax.set_xlabel(axis_label)
-    ax.set_ylabel(spec.ylabel)
-    ax.set_title(spec.title)
+    ax.set_xlabel(axis_label, fontsize=LABEL_FONTSIZE, fontweight="bold")
+    ax.set_ylabel(spec.ylabel, fontsize=LABEL_FONTSIZE, fontweight="bold")
+    if spec.title:
+        ax.set_title(spec.title, fontsize=TITLE_FONTSIZE, fontweight="bold")
+    else:
+        ax.set_title("")
+    _style_tick_labels(ax)
     ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.7)
     if reference is not None:
         ax.axhline(reference, color="#2c3e50", linestyle=":", linewidth=1.1)
 
-    ax.legend(title="Series", loc="upper left", bbox_to_anchor=(1.02, 1))
+    legend = ax.legend(
+        title="Series",
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1),
+        fontsize=LEGEND_FONTSIZE,
+        title_fontsize=LEGEND_FONTSIZE,
+    )
+    if legend is not None:
+        legend.get_title().set_fontweight("bold")
+        for text in legend.get_texts():
+            text.set_fontweight("bold")
 
     fig.tight_layout()
     ensure_dir(out_dir)
@@ -262,9 +288,10 @@ def _plot_imputation_metrics(df: pd.DataFrame, out_dir: Path) -> None:
 def _plot_em_diagnostics(df: pd.DataFrame, out_dir: Path) -> None:
     fig, ax = plt.subplots(figsize=(6, 4))
     sns.histplot(df["em_iter"], bins=20, kde=False, ax=ax, color="#4c72b0")
-    ax.set_xlabel("EM iterations to converge")
-    ax.set_ylabel("Count")
-    ax.set_title("EM iteration counts")
+    ax.set_xlabel("EM iterations to converge", fontsize=LABEL_FONTSIZE, fontweight="bold")
+    ax.set_ylabel("Count", fontsize=LABEL_FONTSIZE, fontweight="bold")
+    ax.set_title("EM iteration counts", fontsize=TITLE_FONTSIZE, fontweight="bold")
+    _style_tick_labels(ax)
     ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.7)
     fig.tight_layout()
     ensure_dir(out_dir)
