@@ -2,7 +2,7 @@
 
 Consider a data generating process with the following structure:
 $$
-Y = \eta_0 + \bm{\eta}^\top \bm{X} + \alpha_Z + \varepsilon_Z
+Y = \eta_0 + \boldsymbol{\eta}^\top \boldsymbol{X} + \alpha_Z + \varepsilon_Z
 $$
 where $\alpha_k$ and $\sigma_k$ are distinct for each cluster, and there is no $R \to Y$ leakage.
 
@@ -10,18 +10,18 @@ where $\alpha_k$ and $\sigma_k$ are distinct for each cluster, and there is no $
 
 - **Number of clusters:** $K = 4$
 - **Feature dimension:** $p = 3$
-- **Cluster shifts:** $\bm{\alpha} = (\alpha_1, \alpha_2, \alpha_3, \alpha_4) = (1, 2, 3, 4)$
-- **Cluster standard deviations:** $\bm{\sigma} = (\sigma_1, \sigma_2, \sigma_3, \sigma_4) = (1, 2, 4, 8)$  
+- **Cluster shifts:** $\boldsymbol{\alpha} = (\alpha_1, \alpha_2, \alpha_3, \alpha_4) = (1, 2, 3, 4)$
+- **Cluster standard deviations:** $\boldsymbol{\sigma} = (\sigma_1, \sigma_2, \sigma_3, \sigma_4) = (1, 2, 4, 8)$  
   (these are standard deviations; variances are $\sigma_k^2$)
-- **Cluster prior:** $\bm{\pi} = \left(\frac{1}{4}, \frac{1}{4}, \frac{1}{4}, \frac{1}{4}\right)$
+- **Cluster prior:** $\boldsymbol{\pi} = \left(\frac{1}{4}, \frac{1}{4}, \frac{1}{4}, \frac{1}{4}\right)$
 - **$R$ model:**  
-  $R \mid Z = k \sim \mathcal{N}(\mu_{R, k}, 1)$, where $\bm{\mu}_R = (-3, -1, +1, +3)$
+  $R \mid Z = k \sim \mathcal{N}(\mu_{R, k}, 1)$, where $\boldsymbol{\mu}_R = (-3, -1, +1, +3)$
 - **$X$ model:**  
-  $\bm{X} \sim \mathcal{N}(0, I_p)$, where $I_p$ is the $p \times p$ identity
+  $\boldsymbol{X} \sim \mathcal{N}(0, I_p)$, where $I_p$ is the $p \times p$ identity
 - **$X \to Y$ part:**  
-  $m(\bm{X}) = \eta_0 + \bm{\eta}^\top \bm{X}$, with $\eta_0 = 0.5$, $\bm{\eta} = (1.0, -0.5, 0.8)$
+  $m(\boldsymbol{X}) = \eta_0 + \boldsymbol{\eta}^\top \boldsymbol{X}$, with $\eta_0 = 0.5$, $\boldsymbol{\eta} = (1.0, -0.5, 0.8)$
 - **Outcome model:**  
-  $Y \mid \bm{X}, Z = k \sim \mathcal{N}(m(\bm{X}) + \alpha_k, \sigma_k^2)$
+  $Y \mid \boldsymbol{X}, Z = k \sim \mathcal{N}(m(\boldsymbol{X}) + \alpha_k, \sigma_k^2)$
 
 ---
 
@@ -33,9 +33,9 @@ where $\alpha_k$ and $\sigma_k$ are distinct for each cluster, and there is no $
    $$
 2. **Sample features:**
    $$
-   \bm{X}_i \sim \mathcal{N}(0, I_3)
+   \boldsymbol{X}_i \sim \mathcal{N}(0, I_3)
    $$
-   That is, $\bm{X}_i = (X_{i1}, X_{i2}, X_{i3})$ with each $X_{ij} \sim \mathcal{N}(0, 1)$ independently.
+   That is, $\boldsymbol{X}_i = (X_{i1}, X_{i2}, X_{i3})$ with each $X_{ij} \sim \mathcal{N}(0, 1)$ independently.
 3. **Sample auxiliary $R$ (cluster-only; no effect on $Y$ given $Z$):**
    $$
    R_i \sim \mathcal{N}(\mu_{R, Z_i}, 1)
@@ -43,7 +43,7 @@ where $\alpha_k$ and $\sigma_k$ are distinct for each cluster, and there is no $
 4. **Compute $X$-part of $Y$:**
    $$
    \begin{align*}
-       m_i &= \eta_0 + \bm{\eta}^\top \bm{X}_i \\
+       m_i &= \eta_0 + \boldsymbol{\eta}^\top \boldsymbol{X}_i \\
            &= 0.5 + 1.0 \cdot X_{i1} - 0.5 \cdot X_{i2} + 0.8 \cdot X_{i3}
    \end{align*}
    $$
@@ -58,8 +58,8 @@ Return dataset $\mathcal{D} = \{ (\bm{X}_i, R_i, Y_i, Z_i) \}_{i=1}^n$.
 
 ### Notes
 
-- Distinct mean shifts: $\bm{\alpha} = (1, 2, 3, 4)$
-- Distinct residual scales: $\bm{\sigma} = (1, 2, 4, 8)$
+- Distinct mean shifts: $\boldsymbol{\alpha} = (1, 2, 3, 4)$
+- Distinct residual scales: $\boldsymbol{\sigma} = (1, 2, 4, 8)$
 - No leakage: $R$ is sampled from $Z$ only and is not used in $Y \mid \bm{X}, Z$
 - To change distinctness, adjust $\bm{\alpha}$ and $\bm{\sigma}$ sequences (e.g., $\alpha_k = k$, $\sigma_k = 2^{k-1}$)
 

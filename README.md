@@ -6,13 +6,13 @@ Default configs live in `experiments/configs/gmm_em.yaml`.
 
 The simulator now mirrors the specification in `sim_model-dgp.md`:
 
-- **Auxiliary feature:** `R | Z = k ∼ 𝒩(μ_{R,k}, 1)` with `μ_R = (-3, -1, 1, 3)`.
-	`α = (1, 2, 3, 4)`, and `ε_Z ∼ 𝒩(0, σ_Z²)` with `σ = (1, 2, 4, 8)`.
-	**Outcome:** `Y = η₀ + ηᵀ X + α_Z + ε_Z`, where `η₀ = 0.5`, `η = (1, -0.5, 0.8)`,
-	`α = (1, 2, 3, 4)`, and `ε_Z ∼ 𝒩(0, σ_Z²)` with `σ = (1, 2, 4, 8)`.
-	The actual shift used in any run is `α̃_k = δ · α_k` where `δ ∈ dgp.delta_list`
+- **Auxiliary feature:** $R \mid Z = k \sim \mathcal{N}(\mu_{R,k}, 1)$ with $\mu_R = (-3, -1, 1, 3)$.
+	$\alpha = (1, 2, 3, 4)$, and $\varepsilon_Z \sim \mathcal{N}(0, \sigma_Z^2)$ with $\sigma = (1, 2, 4, 8)$.
+	**Outcome:** $Y = \eta_0 + \eta^\top X + \alpha_Z + \varepsilon_Z$, where $\eta_0 = 0.5$, $\eta = (1, -0.5, 0.8)$,
+	$\alpha = (1, 2, 3, 4)$, and $\varepsilon_Z \sim \mathcal{N}(0, \sigma_Z^2)$ with $\sigma = (1, 2, 4, 8)$.
+	The actual shift used in any run is $\tilde{\alpha}_k = \delta \cdot \alpha_k$ where $\delta \in \text{dgp.delta\_list}$
 	(default: five values `[0.5, 0.75, 1.0, 1.5, 2.0]`). This “mixture separation”
-	knob lets you sweep how distinct the clusters are without redefining `α`.
+	knob lets you sweep how distinct the clusters are without redefining $\alpha$.
 - No leakage: `R` only informs `Y` through the latent cluster.
 
 Those constants can be overridden through the `dgp` block in the YAML (see
@@ -26,7 +26,7 @@ Those constants can be overridden through the `dgp` block in the YAML (see
 - M-step performs the weighted least squares update for `(η₀, η)` and updates
 	`μ_{R,k}` via responsibility-weighted means.
 - Responsibilities on calibration data use the observed `(R, Y)`, whereas test
-	memberships fall back to the R-only formula `π_k(R) ∝ π_k 𝒩(R | μ_{R,k}, 1)`.
+	memberships fall back to the R-only formula $\pi_k(R) \propto \pi_k \mathcal{N}(R \mid \mu_{R,k}, 1)$.
 - EM-PCP reuses these memberships instead of fitting a separate joint GMM.
 
 The soft predictor and diagnostics (`mean_max_tau`, `z_feature_mse`) now rely on
@@ -133,14 +133,14 @@ Included predictors / objects in this repo:
 | --- | --- |
 | **CQR-ignoreZ** | RandomForest quantile regressor on `[X; R]` with conformalized quantile regression calibration. Still available, but mainly serves as an external reference. |
 | **PCP (X,R)** | RandomForest mean model on `[X; R]` produces residuals `|y - μ_rf(x,r)|` that drive the PCP clustering/reweighting pipeline. |
-| **PCP (X,Z)** | Oracle PCP that augments the regressors and clustering features with the true latent one-hot `Z`. Helpful for gauging the ceiling when the latent label is known. |
-| **PCP (X,ẑ)** | Uses doc-EM responsibilities `ẑ = π(x,r,y)` (soft memberships) instead of the oracle `Z`, measuring how much benefit calibrated memberships alone provide. |
-| **PCP (X,R,ẑ)** | Blends observed `R` with the soft memberships `ẑ`, letting PCP cluster on both auxiliary signals simultaneously. |
-| **EM-PCP** | The membership-aware conformal predictor that weights residuals by `π(x,r,y)` via `MembershipPCPModel`, producing sets `C_em(x,r) = { y : |y - μ_joint(x,r)| ≤ q_em(π(x,r,y)) }`. |
-| **EM-R / EM-RX** | Responsibility pipelines feeding EM-PCP: EM-R fits the GMM on `R` alone (features `τ_R(r)`), while EM-RX fits on `[R; X]` (`τ_RX(x,r)`), toggled by `em_fit.use_X_in_em`. |
-| **MembershipPCPModel** | Consumes membership weights `π` and outputs quantiles `q(π)` by multinomial-precision weighting, enabling set construction `C(π) = { y : |y - μ_joint| ≤ q(π) }`. |
+| **PCP (X,Z)** | Oracle PCP that augments the regressors and clustering features with the true latent one-hot $Z$. Helpful for gauging the ceiling when the latent label is known. |
+| **PCP (X,$\hat{z}$)** | Uses doc-EM responsibilities $\hat{z} = \pi(x,r,y)$ (soft memberships) instead of the oracle $Z$, measuring how much benefit calibrated memberships alone provide. |
+| **PCP (X,R,$\hat{z}$)** | Blends observed $R$ with the soft memberships $\hat{z}$, letting PCP cluster on both auxiliary signals simultaneously. |
+| **EM-PCP** | The membership-aware conformal predictor that weights residuals by $\pi(x,r,y)$ via `MembershipPCPModel`, producing sets $C_{\text{em}}(x,r) = \{ y : |y - \mu_{\text{joint}}(x,r)| \le q_{\text{em}}(\pi(x,r,y)) \}$. |
+| **EM-R / EM-RX** | Responsibility pipelines feeding EM-PCP: EM-R fits the GMM on $R$ alone (features $\tau_R(r)$), while EM-RX fits on $[R; X]$ ($\tau_{RX}(x,r)$), toggled by `em_fit.use_X_in_em`. |
+| **MembershipPCPModel** | Consumes membership weights $\pi$ and outputs quantiles $q(\pi)$ by multinomial-precision weighting, enabling set construction $C(\pi) = \{ y : |y - \mu_{\text{joint}}| \le q(\pi) \}$. |
 
-Here `ẑ` always refers to the doc-EM responsibilities returned by `responsibilities_with_y` / `responsibilities_from_r`.
+Here $\hat{z}$ always refers to the doc-EM responsibilities returned by `responsibilities_with_y` / `responsibilities_from_r`.
 
 **Doc-style updates:**
 

@@ -2,13 +2,13 @@
 
 - **Clusters:** $Z \in \{1,2,3,4\}$ ($K=4$)
 - **X-part (linear):** $m(X; \eta) = \eta_0 + \eta^T X$
-- **Fixed cluster shifts:** $\alpha_1=1,\, \alpha_2=2,\, \alpha_3=3,\, \alpha_4=4$  ($\alpha_k = k$)
-- **Fixed cluster scales:** $\sigma_1=1,\, \sigma_2=2,\, \sigma_3=4,\, \sigma_4=8$  ($\sigma_k = 2^{k-1}$)
+- **Fixed cluster shifts:** $\alpha_1=1,\, \alpha_2=2,\, \alpha_3=3,\, \alpha_4=4$ ($\alpha_k = k$)
+- **Fixed cluster scales:** $\sigma_1=1,\, \sigma_2=2,\, \sigma_3=4,\, \sigma_4=8$ ($\sigma_k = 2^{k-1}$)
 - **Prior over clusters:** $\pi_k = 1/4$
 - **Outcome:**
-  - $Y\,|\, X,\, Z=k \sim \mathrm{Normal}\big(\text{mean} = m(X;\eta) + \alpha_k,\, \text{variance} = \sigma_k^2 \big)$
+  - $Y \mid X, Z=k \sim \mathcal{N}\big(\text{mean} = m(X;\eta) + \alpha_k,\, \text{variance} = \sigma_k^2 \big)$
 - **R-only cluster model (simple Gaussian, learn only the mean):**
-  - $R\,|\, Z=k \sim \mathrm{Normal}(\mu_{R_k},\, 1)$
+  - $R \mid Z=k \sim \mathcal{N}(\mu_{R_k},\, 1)$
 - **No leakage:** $R$ enters only via $Z$; $R$ is never used in $Y\,|\,X, Z$
 
 **Unknown parameters to estimate:** $\eta_0,\, \eta,\, \mu_{R_1},\,\ldots,\,\mu_{R_4}$
