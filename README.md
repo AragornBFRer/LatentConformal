@@ -1,5 +1,7 @@
 > ### Notice
 > This is an ongoing project and subject to changes
+> 
+> If you find this project interesting, you might also want to check out [MDCP](https://github.com/AragornBFRer/MDCP)!
 
 ### Config
 
