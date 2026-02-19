@@ -33,7 +33,7 @@ EM routine:
 
 ---
 
-## 1. Run the experiment (EM-PCP vs. baselines)
+## 1. Run the experiment
 
 Quick start (Linux/macOS)
 
