@@ -1,20 +1,17 @@
+LatentCP
+---
+
 > [!NOTE]
 > It's an ongoing project. A polished version will be released later. If you find this project interesting, you might also want to check out [MDCP](https://github.com/AragornBFRer/MDCP)!
 
-### Config
-
-Default configs live in `experiments/configs/gmm_em.yaml`.
-
----
-
-## XRZY simulation setup
+## Setup
 
 The simulator:
 
 - **Auxiliary feature:** $R \mid Z = k \sim \mathcal{N}(\mu_{R,k}, 1)$ with $\mu_R = (-3, -1, 1, 3)$.
 	$\alpha = (1, 2, 3, 4)$, and $\varepsilon_Z \sim \mathcal{N}(0, \sigma_Z^2)$ with $\sigma = (1, 2, 4, 8)$.
-	**Outcome:** $Y = \eta_0 + \eta^\top X + \alpha_Z + \varepsilon_Z$, where $\eta_0 = 0.5$, $\eta = (1, -0.5, 0.8)$,
-	$\alpha = (1, 2, 3, 4)$, and $\varepsilon_Z \sim \mathcal{N}(0, \sigma_Z^2)$ with $\sigma = (1, 2, 4, 8)$.
+- **Outcome:** $Y = \eta_0 + \eta^\top X + \alpha_Z + \varepsilon_Z$, where $\eta_0 = 0.5$, $\eta = (1, -0.5, 0.8)$, $\alpha = (1, 2, 3, 4)$, and $\varepsilon_Z \sim \mathcal{N}(0, \sigma_Z^2)$ with $\sigma = (1, 2, 4, 8)$.
+
 	The actual shift used in any run is $\tilde{\alpha}_k = \delta \cdot \alpha_k$ where $\delta$ is a list of scaling factors for $\alpha_k$
 	(default: five values `[0.5, 0.75, 1.0, 1.5, 2.0]`). This “mixture separation”
 	knob lets you sweep how distinct the clusters are without redefining $\alpha$.
@@ -23,7 +20,7 @@ The simulator:
 Those constants can be overridden through the `dgp` block in the YAML (see
 `alpha`, `sigma`, `mu_r`, `eta0`, `eta`).
 
-### EM routine
+EM routine:
 
 `src/doc_em.py` implements the EM algorithm:
 
@@ -38,7 +35,7 @@ Those constants can be overridden through the `dgp` block in the YAML (see
 
 ## 1. Run the experiment (EM-PCP vs. baselines)
 
-### Quick start (Linux/macOS)
+Quick start (Linux/macOS)
 
 ```bash
 chmod +x run.sh
@@ -46,7 +43,7 @@ chmod +x run.sh
 ./run.sh experiments/configs/gmm_em.yaml 50 experiments/plots experiments/results/gmm_em_results.csv
 ```
 
-### Windows PowerShell
+Windows PowerShell
 
 ```powershell
 python main.py --config experiments/configs/gmm_em.yaml --trials 50
@@ -58,7 +55,7 @@ Arguments mirror the CLI in `main.py`:
 - `--trials`: overrides the set of seeds defined in the YAML (`1..trials`).
 - `--results`: optional destination CSV (defaults to `io.results_csv`).
 
-### Sequential execution: multi-config launcher
+Sequential execution: multi-config launcher
 
 Sweep several YAML configs without manually juggling output folders. Use `multi_main.py`:
 
@@ -70,6 +67,11 @@ python multi_main.py \
 		--results-root experiments/results \
 		--plots-root experiments/plots
 ```
+
+Config:
+
+Default configs live in `experiments/configs/gmm_em.yaml`.
+
 
 Key facts:
 
